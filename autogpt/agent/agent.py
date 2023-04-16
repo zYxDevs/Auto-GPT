@@ -101,12 +101,9 @@ class Agent:
                     flush=True,
                 )
                 while True:
-                    console_input = clean_input(
-                        Fore.MAGENTA + "Input:" + Style.RESET_ALL
-                    )
+                    console_input = clean_input(f"{Fore.MAGENTA}Input:{Style.RESET_ALL}")
                     if console_input.lower().rstrip() == "y":
                         self.user_input = "GENERATE NEXT COMMAND JSON"
-                        break
                     elif console_input.lower().startswith("y -"):
                         try:
                             self.next_action_count = abs(
@@ -119,15 +116,12 @@ class Agent:
                                 " the number of continuous tasks."
                             )
                             continue
-                        break
                     elif console_input.lower() == "n":
                         self.user_input = "EXIT"
-                        break
                     else:
                         self.user_input = console_input
                         command_name = "human_feedback"
-                        break
-
+                    break
                 if self.user_input == "GENERATE NEXT COMMAND JSON":
                     logger.typewriter_log(
                         "-=-=-=-=-=-=-= COMMAND AUTHORISED BY USER -=-=-=-=-=-=-=",

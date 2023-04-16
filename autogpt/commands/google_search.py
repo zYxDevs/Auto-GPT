@@ -27,9 +27,7 @@ def google_search(query: str, num_results: int = 8) -> str:
     if not results:
         return json.dumps(search_results)
 
-    for j in results:
-        search_results.append(j)
-
+    search_results.extend(iter(results))
     return json.dumps(search_results, ensure_ascii=False, indent=4)
 
 

@@ -105,14 +105,16 @@ def get_prompt() -> str:
             ),
         )
 
-    # Add these command last.
-    commands.append(
-        ("Do Nothing", "do_nothing", {}),
+    commands.extend(
+        (
+            ("Do Nothing", "do_nothing", {}),
+            (
+                "Task Complete (Shutdown)",
+                "task_complete",
+                {"reason": "<reason>"},
+            ),
+        )
     )
-    commands.append(
-        ("Task Complete (Shutdown)", "task_complete", {"reason": "<reason>"}),
-    )
-
     # Add commands to the PromptGenerator object
     for command_label, command_name, args in commands:
         prompt_generator.add_command(command_label, command_name, args)

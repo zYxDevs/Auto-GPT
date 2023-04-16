@@ -8,12 +8,9 @@ from autogpt.llm_utils import create_embedding_with_ada
 
 class PineconeMemory(MemoryProviderSingleton):
     def __init__(self, cfg):
-        pinecone_api_key = cfg.pinecone_api_key
         pinecone_region = cfg.pinecone_region
+        pinecone_api_key = cfg.pinecone_api_key
         pinecone.init(api_key=pinecone_api_key, environment=pinecone_region)
-        dimension = 1536
-        metric = "cosine"
-        pod_type = "p1"
         table_name = "auto-gpt"
         # this assumes we don't start with memory.
         # for now this works.
@@ -30,14 +27,14 @@ class PineconeMemory(MemoryProviderSingleton):
                 Style.BRIGHT + str(e) + Style.RESET_ALL,
             )
             logger.double_check(
-                "Please ensure you have setup and configured Pinecone properly for use."
-                + f"You can check out {Fore.CYAN + Style.BRIGHT}"
-                "https://github.com/Torantulino/Auto-GPT#-pinecone-api-key-setup"
-                f"{Style.RESET_ALL} to ensure you've set up everything correctly."
+                f"Please ensure you have setup and configured Pinecone properly for use.You can check out {Fore.CYAN + Style.BRIGHT}https://github.com/Torantulino/Auto-GPT#-pinecone-api-key-setup{Style.RESET_ALL} to ensure you've set up everything correctly."
             )
             exit(1)
 
         if table_name not in pinecone.list_indexes():
+            dimension = 1536
+            metric = "cosine"
+            pod_type = "p1"
             pinecone.create_index(
                 table_name, dimension=dimension, metric=metric, pod_type=pod_type
             )
