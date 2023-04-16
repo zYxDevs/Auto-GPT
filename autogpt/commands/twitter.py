@@ -22,4 +22,4 @@ def send_tweet(tweet_text):
         api.update_status(tweet_text)
         print("Tweet sent successfully!")
     except tweepy.TweepyException as e:
-        print("Error sending tweet: {}".format(e.reason))
+        print(f"Error sending tweet: {e.reason}")

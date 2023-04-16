@@ -69,7 +69,7 @@ def main() -> None:
 
     # Initialize memory
     memory = get_memory(cfg, init=args.init)
-    print("Using memory of type: " + memory.__class__.__name__)
+    print(f"Using memory of type: {memory.__class__.__name__}")
 
     if args.file:
         try:

@@ -56,11 +56,7 @@ class MilvusMemory(MemoryProviderSingleton):
         """
         embedding = get_ada_embedding(data)
         result = self.collection.insert([[embedding], [data]])
-        _text = (
-            "Inserting data into memory at primary key: "
-            f"{result.primary_keys[0]}:\n data: {data}"
-        )
-        return _text
+        return f"Inserting data into memory at primary key: {result.primary_keys[0]}:\n data: {data}"
 
     def get(self, data):
         """Return the most relevant data in memory.

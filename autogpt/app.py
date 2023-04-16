@@ -99,10 +99,14 @@ def map_command_synonyms(command_name: str):
         ("create_file", "write_to_file"),
         ("search", "google"),
     ]
-    for seen_command, actual_command_name in synonyms:
-        if command_name == seen_command:
-            return actual_command_name
-    return command_name
+    return next(
+        (
+            actual_command_name
+            for seen_command, actual_command_name in synonyms
+            if command_name == seen_command
+        ),
+        command_name,
+    )
 
 
 def execute_command(command_name: str, arguments):
@@ -124,12 +128,10 @@ def execute_command(command_name: str, arguments):
             # search method
             key = CFG.google_api_key
             if key and key.strip() and key != "your-google-api-key":
-                google_result = google_official_search(arguments["input"])
-                return google_result
-            else:
-                google_result = google_search(arguments["input"])
-                safe_message = google_result.encode("utf-8", "ignore")
-                return str(safe_message)
+                return google_official_search(arguments["input"])
+            google_result = google_search(arguments["input"])
+            safe_message = google_result.encode("utf-8", "ignore")
+            return str(safe_message)
         elif command_name == "memory_add":
             return memory.add(arguments["string"])
         elif command_name == "start_agent":
@@ -162,9 +164,6 @@ def execute_command(command_name: str, arguments):
             return search_files(arguments["directory"])
         elif command_name == "browse_website":
             return browse_website(arguments["url"], arguments["question"])
-        # TODO: Change these to take in a file rather than pasted code, if
-        # non-file is given, return instructions "Input should be a python
-        # filepath, write your code to file and try again"
         elif command_name == "evaluate_code":
             return evaluate_code(arguments["code"])
         elif command_name == "improve_code":
@@ -251,10 +250,10 @@ def start_agent(name: str, task: str, prompt: str, model=CFG.fast_llm_model) -> 
     voice_name = name.replace("_", " ")
 
     first_message = f"""You are {name}.  Respond with: "Acknowledged"."""
-    agent_intro = f"{voice_name} here, Reporting for duty!"
-
     # Create agent
     if CFG.speak_mode:
+        agent_intro = f"{voice_name} here, Reporting for duty!"
+
         say_text(agent_intro, 1)
     key, ack = AGENT_MANAGER.create_agent(task, first_message, model)
 
@@ -288,7 +287,7 @@ def list_agents():
         str: A list of all agents
     """
     return "List of agents:\n" + "\n".join(
-        [str(x[0]) + ": " + x[1] for x in AGENT_MANAGER.list_agents()]
+        [f"{str(x[0])}: {x[1]}" for x in AGENT_MANAGER.list_agents()]
     )
 
 

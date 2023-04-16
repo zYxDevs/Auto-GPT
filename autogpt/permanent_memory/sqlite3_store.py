@@ -36,14 +36,10 @@ class MemoryDB:
     # Get the highest session id. Initially 0.
     def get_max_session_id(self):
         id = None
-        cmd_str = f"SELECT MAX(session) FROM text;"
+        cmd_str = "SELECT MAX(session) FROM text;"
         cnx = self.get_cnx()
         max_id = cnx.execute(cmd_str).fetchone()[0]
-        if max_id is None:  # New db, session 0
-            id = 0
-        else:
-            id = max_id
-        return id
+        return 0 if max_id is None else max_id
 
     # Get next key id for inserting text into db.
     def get_next_key(self):
@@ -52,10 +48,7 @@ class MemoryDB:
             where session = {self.session_id};"
         cnx = self.get_cnx()
         next_key = cnx.execute(cmd_str).fetchone()[0]
-        if next_key is None:  # First key
-            next_key = 0
-        else:
-            next_key = int(next_key) + 1
+        next_key = 0 if next_key is None else int(next_key) + 1
         return next_key
 
     # Insert new text into db.
@@ -92,10 +85,7 @@ class MemoryDB:
         cmd_str = f"SELECT * FROM text('{text}')"
         cnx = self.get_cnx()
         rows = cnx.execute(cmd_str).fetchall()
-        lines = []
-        for r in rows:
-            lines.append(r[2])
-        return lines
+        return [r[2] for r in rows]
 
     # Get entire session text. If no id supplied, use current session id.
     def get_session(self, id=None):
@@ -104,10 +94,7 @@ class MemoryDB:
         cmd_str = f"SELECT * FROM text where session = {id}"
         cnx = self.get_cnx()
         rows = cnx.execute(cmd_str).fetchall()
-        lines = []
-        for r in rows:
-            lines.append(r[2])
-        return lines
+        return [r[2] for r in rows]
 
     # Commit and close the database connection.
     def quit(self):
