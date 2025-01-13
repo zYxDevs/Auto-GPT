@@ -27,13 +27,13 @@ Output => Artifact (files, image, code, etc, etc...)
 
 ## Defining your Agent
 
-Go to https://github.com/Significant-Gravitas/AutoGPT/blob/master/tests/integration/agent_factory.py
+Go to https://github.com/Significant-Gravitas/AutoGPT/blob/master/classic/original_autogpt/tests/integration/agent_factory.py
 
 Create your agent fixture.
 
 ```python
 def kubernetes_agent(
-    agent_test_config, memory_json_file, workspace: Workspace
+    agent_test_config, workspace: Workspace
 ):
     # Please choose the commands your agent will need to beat the challenges, the full list is available in the main.py
     # (we 're working on a better way to design this, for now you have to look at main.py)
@@ -42,21 +42,20 @@ def kubernetes_agent(
     command_registry.import_commands("autogpt.app")
 
     # Define all the settings of our challenged agent
-    ai_config = AIConfig(
+    ai_profile = AIProfile(
         ai_name="Kubernetes",
         ai_role="an autonomous agent that specializes in creating Kubernetes deployment templates.",
         ai_goals=[
             "Write a simple kubernetes deployment file and save it as a kube.yaml.",
         ],
     )
-    ai_config.command_registry = command_registry
+    ai_profile.command_registry = command_registry
 
-    system_prompt = ai_config.construct_full_prompt()
+    system_prompt = ai_profile.construct_full_prompt()
     agent_test_config.set_continuous_mode(False)
     agent = Agent(
-        memory=memory_json_file,
         command_registry=command_registry,
-        config=ai_config,
+        config=ai_profile,
         next_action_count=0,
         triggering_prompt=DEFAULT_TRIGGERING_PROMPT,
     )
