@@ -9,7 +9,7 @@ import {
   StopCircle,
   X,
 } from "@phosphor-icons/react";
-import { KeyboardEvent, useRef, useState } from "react";
+import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { CustomNode } from "../FlowEditor/nodes/CustomNode/CustomNode";
 import { GraphAction } from "./helpers";
 import { useBuilderChatPanel } from "./useBuilderChatPanel";
@@ -37,6 +37,11 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isStreaming = status === "streaming" || status === "submitted";
+
+  // Scroll to bottom whenever a new message lands (AI response or user send)
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length]);
 
   function handleSend() {
     const text = inputValue.trim();
