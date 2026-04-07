@@ -187,7 +187,7 @@ function MessageList({
             const key =
               action.type === "update_node_input"
                 ? `${action.nodeId}:${action.key}`
-                : `${action.source}->${action.target}`;
+                : `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
             return (
               <ActionItem
                 key={key}

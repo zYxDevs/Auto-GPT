@@ -149,7 +149,7 @@ export function useBuilderChatPanel({
       const key =
         action.type === "update_node_input"
           ? `${action.nodeId}:${action.key}`
-          : `${action.source}->${action.target}`;
+          : `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
