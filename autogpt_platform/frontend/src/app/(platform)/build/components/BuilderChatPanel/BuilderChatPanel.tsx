@@ -10,6 +10,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { KeyboardEvent, useRef, useState } from "react";
+import type { CustomNode } from "../FlowEditor/nodes/CustomNode/CustomNode";
 import { GraphAction } from "./helpers";
 import { useBuilderChatPanel } from "./useBuilderChatPanel";
 
@@ -26,6 +27,8 @@ export function BuilderChatPanel({ className }: Props) {
     stop,
     status,
     isCreatingSession,
+    sessionError,
+    nodes,
     parsedActions,
     handleApplyAction,
   } = useBuilderChatPanel();
@@ -65,6 +68,8 @@ export function BuilderChatPanel({ className }: Props) {
           <MessageList
             messages={messages}
             isCreatingSession={isCreatingSession}
+            sessionError={sessionError}
+            nodes={nodes}
             parsedActions={parsedActions}
             onApplyAction={handleApplyAction}
             messagesEndRef={messagesEndRef}
@@ -116,6 +121,8 @@ function PanelHeader({ onClose }: { onClose: () => void }) {
 interface MessageListProps {
   messages: ReturnType<typeof useBuilderChatPanel>["messages"];
   isCreatingSession: boolean;
+  sessionError: boolean;
+  nodes: CustomNode[];
   parsedActions: GraphAction[];
   onApplyAction: (action: GraphAction) => void;
   messagesEndRef: React.RefObject<HTMLDivElement>;
@@ -124,6 +131,8 @@ interface MessageListProps {
 function MessageList({
   messages,
   isCreatingSession,
+  sessionError,
+  nodes,
   parsedActions,
   onApplyAction,
   messagesEndRef,
@@ -134,6 +143,12 @@ function MessageList({
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <SpinnerGap size={14} className="animate-spin" />
           <span>Setting up chat session…</span>
+        </div>
+      )}
+
+      {sessionError && (
+        <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-600">
+          Failed to start chat session. Please close and try again.
         </div>
       )}
 
@@ -167,13 +182,20 @@ function MessageList({
           <p className="text-xs font-medium text-violet-700">
             Suggested changes
           </p>
-          {parsedActions.map((action, i) => (
-            <ActionItem
-              key={i}
-              action={action}
-              onApply={() => onApplyAction(action)}
-            />
-          ))}
+          {parsedActions.map((action) => {
+            const key =
+              action.type === "update_node_input"
+                ? `${action.nodeId}:${action.key}`
+                : `${action.source}->${action.target}`;
+            return (
+              <ActionItem
+                key={key}
+                action={action}
+                nodes={nodes}
+                onApply={() => onApplyAction(action)}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -184,9 +206,11 @@ function MessageList({
 
 function ActionItem({
   action,
+  nodes,
   onApply,
 }: {
   action: GraphAction;
+  nodes: CustomNode[];
   onApply: () => void;
 }) {
   const [applied, setApplied] = useState(false);
@@ -196,10 +220,13 @@ function ActionItem({
     setApplied(true);
   }
 
+  const nodeName = (id: string) =>
+    nodes.find((n) => n.id === id)?.data.title ?? id;
+
   const label =
     action.type === "update_node_input"
-      ? `Set node ${action.nodeId} "${action.key}" = ${JSON.stringify(action.value)}`
-      : `Connect node ${action.source} → ${action.target}`;
+      ? `Set "${nodeName(action.nodeId)}" "${action.key}" = ${JSON.stringify(action.value)}`
+      : `Connect "${nodeName(action.source)}" → "${nodeName(action.target)}"`;
 
   return (
     <div className="flex items-start justify-between gap-2 rounded bg-white p-2 text-xs shadow-sm">

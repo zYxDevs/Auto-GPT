@@ -19,6 +19,7 @@ export function useBuilderChatPanel() {
   const [isOpen, setIsOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [sessionError, setSessionError] = useState(false);
   const initializedRef = useRef(false);
   const sendMessageRef = useRef<SendMessageFn | null>(null);
 
@@ -28,7 +29,7 @@ export function useBuilderChatPanel() {
   const addEdge = useEdgeStore(useShallow((s) => s.addEdge));
 
   useEffect(() => {
-    if (!isOpen || sessionId || isCreatingSession) return;
+    if (!isOpen || sessionId || isCreatingSession || sessionError) return;
 
     async function createSession() {
       setIsCreatingSession(true);
@@ -36,14 +37,18 @@ export function useBuilderChatPanel() {
         const res = await postV2CreateSession(null);
         if (res.status === 200) {
           setSessionId(res.data.id);
+        } else {
+          setSessionError(true);
         }
+      } catch {
+        setSessionError(true);
       } finally {
         setIsCreatingSession(false);
       }
     }
 
     createSession();
-  }, [isOpen, sessionId, isCreatingSession]);
+  }, [isOpen, sessionId, isCreatingSession, sessionError]);
 
   const transport = useMemo(
     () =>
@@ -93,7 +98,7 @@ export function useBuilderChatPanel() {
     sendMessageRef.current?.({
       text: `I'm building an agent in the AutoGPT flow builder. Here's the current graph:\n\n${summary}\n\nWhat does this agent do?`,
     });
-  }, [sessionId, transport, nodes, edges]);
+  }, [sessionId, transport]);
 
   function handleToggle() {
     setIsOpen((o) => !o);
@@ -142,7 +147,9 @@ export function useBuilderChatPanel() {
     stop,
     status,
     isCreatingSession,
+    sessionError,
     sessionId,
+    nodes,
     parsedActions,
     handleApplyAction,
   };
