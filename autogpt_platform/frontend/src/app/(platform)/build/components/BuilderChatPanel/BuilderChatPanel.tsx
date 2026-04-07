@@ -16,9 +16,10 @@ import { useBuilderChatPanel } from "./useBuilderChatPanel";
 
 interface Props {
   className?: string;
+  isGraphLoaded?: boolean;
 }
 
-export function BuilderChatPanel({ className }: Props) {
+export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
   const {
     isOpen,
     handleToggle,
@@ -31,7 +32,7 @@ export function BuilderChatPanel({ className }: Props) {
     nodes,
     parsedActions,
     handleApplyAction,
-  } = useBuilderChatPanel();
+  } = useBuilderChatPanel({ isGraphLoaded });
 
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);

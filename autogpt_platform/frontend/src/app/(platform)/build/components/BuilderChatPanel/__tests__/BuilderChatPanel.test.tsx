@@ -302,4 +302,16 @@ Here is a suggestion:
     const text = '```json\n{"key": "value"}\n```';
     expect(parseGraphActions(text)).toEqual([]);
   });
+
+  it("ignores update_node_input actions with missing required fields", () => {
+    const text =
+      '```json\n{"action": "update_node_input", "node_id": "1"}\n```';
+    expect(parseGraphActions(text)).toEqual([]);
+  });
+
+  it("ignores connect_nodes actions with empty handles", () => {
+    const text =
+      '```json\n{"action": "connect_nodes", "source": "1", "target": "2", "source_handle": "", "target_handle": "input"}\n```';
+    expect(parseGraphActions(text)).toEqual([]);
+  });
 });

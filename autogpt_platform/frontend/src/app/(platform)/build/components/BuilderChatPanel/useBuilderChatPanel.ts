@@ -15,7 +15,13 @@ import {
 
 type SendMessageFn = ReturnType<typeof useChat>["sendMessage"];
 
-export function useBuilderChatPanel() {
+interface UseBuilderChatPanelArgs {
+  isGraphLoaded?: boolean;
+}
+
+export function useBuilderChatPanel({
+  isGraphLoaded = true,
+}: UseBuilderChatPanelArgs = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
@@ -92,13 +98,14 @@ export function useBuilderChatPanel() {
   sendMessageRef.current = sendMessage;
 
   useEffect(() => {
-    if (!sessionId || !transport || initializedRef.current) return;
+    if (!sessionId || !transport || !isGraphLoaded || initializedRef.current)
+      return;
     initializedRef.current = true;
     const summary = serializeGraphForChat(nodes, edges);
     sendMessageRef.current?.({
       text: `I'm building an agent in the AutoGPT flow builder. Here's the current graph:\n\n${summary}\n\nWhat does this agent do?`,
     });
-  }, [sessionId, transport]);
+  }, [sessionId, transport, isGraphLoaded]);
 
   function handleToggle() {
     setIsOpen((o) => !o);
@@ -136,7 +143,17 @@ export function useBuilderChatPanel() {
       )
       .map((p) => p.text)
       .join("");
-    return parseGraphActions(text);
+    const parsed = parseGraphActions(text);
+    const seen = new Set<string>();
+    return parsed.filter((action) => {
+      const key =
+        action.type === "update_node_input"
+          ? `${action.nodeId}:${action.key}`
+          : `${action.source}->${action.target}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [messages]);
 
   return {

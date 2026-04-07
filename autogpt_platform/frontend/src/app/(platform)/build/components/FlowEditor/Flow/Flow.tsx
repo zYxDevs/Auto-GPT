@@ -135,7 +135,7 @@ export const Flow = () => {
         executionId={flowExecutionID || undefined}
         graphId={flowID || undefined}
       />
-      <BuilderChatPanel />
+      <BuilderChatPanel isGraphLoaded={isInitialLoadComplete} />
     </div>
   );
 };

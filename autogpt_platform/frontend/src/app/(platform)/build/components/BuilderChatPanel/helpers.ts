@@ -62,19 +62,44 @@ export function parseGraphActions(text: string): GraphAction[] {
       }
       const obj = parsed as Record<string, unknown>;
       if (obj.action === "update_node_input") {
+        const nodeId = obj.node_id;
+        const key = obj.key;
+        if (
+          typeof nodeId !== "string" ||
+          !nodeId ||
+          typeof key !== "string" ||
+          !key ||
+          obj.value === undefined
+        )
+          continue;
         actions.push({
           type: "update_node_input",
-          nodeId: String(obj.node_id ?? ""),
-          key: String(obj.key ?? ""),
+          nodeId,
+          key,
           value: obj.value,
         });
       } else if (obj.action === "connect_nodes") {
+        const source = obj.source;
+        const target = obj.target;
+        const sourceHandle = obj.source_handle;
+        const targetHandle = obj.target_handle;
+        if (
+          typeof source !== "string" ||
+          !source ||
+          typeof target !== "string" ||
+          !target ||
+          typeof sourceHandle !== "string" ||
+          !sourceHandle ||
+          typeof targetHandle !== "string" ||
+          !targetHandle
+        )
+          continue;
         actions.push({
           type: "connect_nodes",
-          source: String(obj.source ?? ""),
-          target: String(obj.target ?? ""),
-          sourceHandle: String(obj.source_handle ?? ""),
-          targetHandle: String(obj.target_handle ?? ""),
+          source,
+          target,
+          sourceHandle,
+          targetHandle,
         });
       }
     } catch {
