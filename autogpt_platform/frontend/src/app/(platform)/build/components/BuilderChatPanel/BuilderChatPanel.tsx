@@ -181,7 +181,7 @@ function MessageList({
       {parsedActions.length > 0 && (
         <div className="space-y-2 rounded-lg border border-violet-100 bg-violet-50 p-3">
           <p className="text-xs font-medium text-violet-700">
-            Suggested changes
+            AI applied these changes
           </p>
           {parsedActions.map((action) => {
             const key =
@@ -214,7 +214,7 @@ function ActionItem({
   nodes: CustomNode[];
   onApply: () => void;
 }) {
-  const [applied, setApplied] = useState(false);
+  const [applied, setApplied] = useState(true);
 
   function handleApply() {
     onApply();

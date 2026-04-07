@@ -1,9 +1,12 @@
 import { postV2CreateSession } from "@/app/api/__generated__/endpoints/chat/chat";
+import { getGetV1GetSpecificGraphQueryKey } from "@/app/api/__generated__/endpoints/graphs/graphs";
 import { getWebSocketToken } from "@/lib/supabase/actions";
 import { environment } from "@/services/environment";
+import { useQueryClient } from "@tanstack/react-query";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { parseAsString, useQueryStates } from "nuqs";
 import { useShallow } from "zustand/react/shallow";
 import { useEdgeStore } from "../../stores/edgeStore";
 import { useNodeStore } from "../../stores/nodeStore";
@@ -28,6 +31,10 @@ export function useBuilderChatPanel({
   const [sessionError, setSessionError] = useState(false);
   const initializedRef = useRef(false);
   const sendMessageRef = useRef<SendMessageFn | null>(null);
+  const prevStatusRef = useRef<string>("ready");
+
+  const [{ flowID }] = useQueryStates({ flowID: parseAsString });
+  const queryClient = useQueryClient();
 
   const nodes = useNodeStore(useShallow((s) => s.nodes));
   const edges = useEdgeStore(useShallow((s) => s.edges));
@@ -97,13 +104,36 @@ export function useBuilderChatPanel({
   // without including it in the deps array (avoids re-triggering the effect)
   sendMessageRef.current = sendMessage;
 
+  // Refresh the builder canvas after the AI finishes responding. The AI uses
+  // edit_agent to modify the graph server-side; invalidating the query causes
+  // useFlow.ts to re-fetch and repopulate nodeStore/edgeStore automatically.
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = status;
+    if (
+      status === "ready" &&
+      (prev === "streaming" || prev === "submitted") &&
+      flowID
+    ) {
+      queryClient.invalidateQueries({
+        queryKey: getGetV1GetSpecificGraphQueryKey(flowID),
+      });
+    }
+  }, [status, flowID, queryClient]);
+
   useEffect(() => {
     if (!sessionId || !transport || !isGraphLoaded || initializedRef.current)
       return;
     initializedRef.current = true;
     const summary = serializeGraphForChat(nodes, edges);
     sendMessageRef.current?.({
-      text: `I'm building an agent in the AutoGPT flow builder. Here's the current graph:\n\n${summary}\n\nWhat does this agent do?`,
+      text:
+        `I'm building an agent in the AutoGPT flow builder. Here's the current graph:\n\n${summary}\n\n` +
+        `When you modify the graph using edit_agent or fix_agent_graph, also include a JSON code block ` +
+        `for each discrete change so the canvas can display what you did:\n` +
+        `- Node input changed: \`\`\`json\n{"action": "update_node_input", "node_id": "<id>", "key": "<field>", "value": <value>}\n\`\`\`\n` +
+        `- Connection added: \`\`\`json\n{"action": "connect_nodes", "source": "<id>", "target": "<id>", "source_handle": "<handle>", "target_handle": "<handle>"}\n\`\`\`\n\n` +
+        `What does this agent do?`,
     });
   }, [sessionId, transport, isGraphLoaded]);
 

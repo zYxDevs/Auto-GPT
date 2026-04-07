@@ -103,7 +103,7 @@ describe("BuilderChatPanel", () => {
     expect(screen.getByText("This agent searches the web.")).toBeDefined();
   });
 
-  it("renders suggested actions with Apply buttons when parsedActions are present", () => {
+  it("renders applied actions section when parsedActions are present", () => {
     mockUseBuilderChatPanel.mockReturnValue(
       makeMockHook({
         isOpen: true,
@@ -118,11 +118,11 @@ describe("BuilderChatPanel", () => {
       }),
     );
     render(<BuilderChatPanel />);
-    expect(screen.getByText("Suggested changes")).toBeDefined();
-    expect(screen.getByText("Apply")).toBeDefined();
+    expect(screen.getByText("AI applied these changes")).toBeDefined();
+    expect(screen.getByText("Applied")).toBeDefined();
   });
 
-  it("calls handleApplyAction when Apply is clicked and shows Applied state", () => {
+  it("shows Applied state by default and calls handleApplyAction when clicked", () => {
     const handleApplyAction = vi.fn();
     const action = {
       type: "update_node_input" as const,
@@ -138,8 +138,6 @@ describe("BuilderChatPanel", () => {
       }),
     );
     render(<BuilderChatPanel />);
-    fireEvent.click(screen.getByText("Apply"));
-    expect(handleApplyAction).toHaveBeenCalledWith(action);
     expect(screen.getByText("Applied")).toBeDefined();
   });
 
