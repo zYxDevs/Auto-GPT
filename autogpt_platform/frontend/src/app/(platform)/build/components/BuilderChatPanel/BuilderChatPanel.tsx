@@ -29,6 +29,7 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
     status,
     isCreatingSession,
     sessionError,
+    sessionId,
     nodes,
     parsedActions,
     handleApplyAction,
@@ -37,6 +38,10 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isStreaming = status === "streaming" || status === "submitted";
+  // Block input until the session is ready to prevent messages being sent
+  // before the seed context has been delivered to the AI.
+  const canSend =
+    Boolean(sessionId) && !isCreatingSession && !sessionError && !isStreaming;
 
   // Scroll to bottom whenever a new message lands (AI response or user send)
   useEffect(() => {
@@ -45,7 +50,7 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
 
   function handleSend() {
     const text = inputValue.trim();
-    if (!text || isStreaming) return;
+    if (!text || !canSend) return;
     setInputValue("");
     sendMessage({ text });
     setTimeout(() => {
@@ -88,6 +93,7 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
             onSend={handleSend}
             onStop={stop}
             isStreaming={isStreaming}
+            isDisabled={!canSend}
           />
         </div>
       )}
@@ -219,6 +225,9 @@ function ActionItem({
   nodes: CustomNode[];
   onApply: () => void;
 }) {
+  // The AI applies changes server-side via edit_agent; the canvas refreshes
+  // automatically via invalidateQueries. The button starts in the applied state
+  // to reflect that changes are already live — not pending user confirmation.
   const [applied, setApplied] = useState(true);
 
   function handleApply() {
@@ -260,6 +269,7 @@ interface PanelInputProps {
   onSend: () => void;
   onStop: () => void;
   isStreaming: boolean;
+  isDisabled: boolean;
 }
 
 function PanelInput({
@@ -269,17 +279,19 @@ function PanelInput({
   onSend,
   onStop,
   isStreaming,
+  isDisabled,
 }: PanelInputProps) {
   return (
     <div className="border-t border-slate-100 p-3">
       <div className="flex items-end gap-2">
         <textarea
           value={value}
+          disabled={isDisabled}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder="Ask about your agent…"
           rows={2}
-          className="flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-200"
+          className="flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-200 disabled:opacity-50"
         />
         {isStreaming ? (
           <button
@@ -292,7 +304,7 @@ function PanelInput({
         ) : (
           <button
             onClick={onSend}
-            disabled={!value.trim()}
+            disabled={isDisabled || !value.trim()}
             className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-600 text-white transition-colors hover:bg-violet-700 disabled:opacity-40"
             aria-label="Send"
           >

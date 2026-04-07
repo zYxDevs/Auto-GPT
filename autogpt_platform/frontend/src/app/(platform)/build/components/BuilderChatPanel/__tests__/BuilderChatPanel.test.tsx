@@ -122,8 +122,7 @@ describe("BuilderChatPanel", () => {
     expect(screen.getByText("Applied")).toBeDefined();
   });
 
-  it("shows Applied state by default and calls handleApplyAction when clicked", () => {
-    const handleApplyAction = vi.fn();
+  it("shows pre-applied actions as disabled", () => {
     const action = {
       type: "update_node_input" as const,
       nodeId: "1",
@@ -134,11 +133,13 @@ describe("BuilderChatPanel", () => {
       makeMockHook({
         isOpen: true,
         parsedActions: [action],
-        handleApplyAction,
       }),
     );
     render(<BuilderChatPanel />);
-    expect(screen.getByText("Applied")).toBeDefined();
+    const button = screen.getByRole("button", {
+      name: "Applied",
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
   });
 
   it("calls sendMessage when the user submits a message", () => {

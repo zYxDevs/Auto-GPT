@@ -41,6 +41,14 @@ export function useBuilderChatPanel({
   const updateNodeData = useNodeStore(useShallow((s) => s.updateNodeData));
   const addEdge = useEdgeStore(useShallow((s) => s.addEdge));
 
+  // Reset session and initialized state when the user navigates to a different
+  // graph so the new graph's context is sent to the AI on next open.
+  useEffect(() => {
+    setSessionId(null);
+    setSessionError(false);
+    initializedRef.current = false;
+  }, [flowID]);
+
   useEffect(() => {
     if (!isOpen || sessionId || isCreatingSession || sessionError) return;
 
@@ -104,22 +112,48 @@ export function useBuilderChatPanel({
   // without including it in the deps array (avoids re-triggering the effect)
   sendMessageRef.current = sendMessage;
 
-  // Refresh the builder canvas after the AI finishes responding. The AI uses
-  // edit_agent to modify the graph server-side; invalidating the query causes
-  // useFlow.ts to re-fetch and repopulate nodeStore/edgeStore automatically.
+  // Parsed actions from the last assistant message. Placed before the
+  // invalidation effect so the effect can check whether a turn mutated the graph.
+  const parsedActions = useMemo(() => {
+    const assistantMessages = messages.filter((m) => m.role === "assistant");
+    const last = assistantMessages[assistantMessages.length - 1];
+    if (!last) return [];
+    const text = last.parts
+      .filter(
+        (p): p is Extract<typeof p, { type: "text" }> => p.type === "text",
+      )
+      .map((p) => p.text)
+      .join("");
+    const parsed = parseGraphActions(text);
+    const seen = new Set<string>();
+    return parsed.filter((action) => {
+      const key =
+        action.type === "update_node_input"
+          ? `${action.nodeId}:${action.key}`
+          : `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [messages]);
+
+  // Refresh the canvas only when the AI turn actually mutated the graph via
+  // edit_agent. Gating on parsedActions.length > 0 avoids an unnecessary
+  // refetch after read-only turns (e.g. the initial description response).
   useEffect(() => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = status;
     if (
       status === "ready" &&
       (prev === "streaming" || prev === "submitted") &&
-      flowID
+      flowID &&
+      parsedActions.length > 0
     ) {
       queryClient.invalidateQueries({
         queryKey: getGetV1GetSpecificGraphQueryKey(flowID),
       });
     }
-  }, [status, flowID, queryClient]);
+  }, [status, flowID, queryClient, parsedActions.length]);
 
   useEffect(() => {
     if (!sessionId || !transport || !isGraphLoaded || initializedRef.current)
@@ -142,6 +176,10 @@ export function useBuilderChatPanel({
   }, [sessionId, transport, isGraphLoaded]);
 
   function handleToggle() {
+    // Reset session error when reopening so the panel can retry session creation
+    if (!isOpen && !sessionId) {
+      setSessionError(false);
+    }
     setIsOpen((o) => !o);
   }
 
@@ -166,29 +204,6 @@ export function useBuilderChatPanel({
       });
     }
   }
-
-  const parsedActions = useMemo(() => {
-    const assistantMessages = messages.filter((m) => m.role === "assistant");
-    const last = assistantMessages[assistantMessages.length - 1];
-    if (!last) return [];
-    const text = last.parts
-      .filter(
-        (p): p is Extract<typeof p, { type: "text" }> => p.type === "text",
-      )
-      .map((p) => p.text)
-      .join("");
-    const parsed = parseGraphActions(text);
-    const seen = new Set<string>();
-    return parsed.filter((action) => {
-      const key =
-        action.type === "update_node_input"
-          ? `${action.nodeId}:${action.key}`
-          : `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [messages]);
 
   return {
     isOpen,
