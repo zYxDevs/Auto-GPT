@@ -1,6 +1,7 @@
 import { useGetV1GetSpecificGraph } from "@/app/api/__generated__/endpoints/graphs/graphs";
 import { okData } from "@/app/api/helpers";
 import { FloatingReviewsPanel } from "@/components/organisms/FloatingReviewsPanel/FloatingReviewsPanel";
+import { BuilderChatPanel } from "../../BuilderChatPanel/BuilderChatPanel";
 import { Background, ReactFlow } from "@xyflow/react";
 import { parseAsString, useQueryStates } from "nuqs";
 import { useCallback, useMemo } from "react";
@@ -134,6 +135,7 @@ export const Flow = () => {
         executionId={flowExecutionID || undefined}
         graphId={flowID || undefined}
       />
+      <BuilderChatPanel />
     </div>
   );
 };
