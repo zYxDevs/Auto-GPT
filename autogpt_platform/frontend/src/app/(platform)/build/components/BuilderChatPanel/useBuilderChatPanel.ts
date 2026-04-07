@@ -129,10 +129,14 @@ export function useBuilderChatPanel({
     sendMessageRef.current?.({
       text:
         `I'm building an agent in the AutoGPT flow builder. Here's the current graph:\n\n${summary}\n\n` +
-        `When you modify the graph using edit_agent or fix_agent_graph, also include a JSON code block ` +
-        `for each discrete change so the canvas can display what you did:\n` +
-        `- Node input changed: \`\`\`json\n{"action": "update_node_input", "node_id": "<id>", "key": "<field>", "value": <value>}\n\`\`\`\n` +
-        `- Connection added: \`\`\`json\n{"action": "connect_nodes", "source": "<id>", "target": "<id>", "source_handle": "<handle>", "target_handle": "<handle>"}\n\`\`\`\n\n` +
+        `IMPORTANT: When you modify the graph using edit_agent or fix_agent_graph, you MUST output one JSON ` +
+        `code block per change using EXACTLY these formats — no other structure is recognized:\n\n` +
+        `To update a node input field:\n` +
+        `\`\`\`json\n{"action": "update_node_input", "node_id": "<exact node id>", "key": "<input field name>", "value": <new value>}\n\`\`\`\n\n` +
+        `To add a connection between nodes:\n` +
+        `\`\`\`json\n{"action": "connect_nodes", "source": "<source node id>", "target": "<target node id>", "source_handle": "<output handle name>", "target_handle": "<input handle name>"}\n\`\`\`\n\n` +
+        `Rules: the "action" key is required and must be exactly "update_node_input" or "connect_nodes". ` +
+        `Do not use any other field names (e.g. "block", "change", "field", "from", "to" are NOT valid).\n\n` +
         `What does this agent do?`,
     });
   }, [sessionId, transport, isGraphLoaded]);
