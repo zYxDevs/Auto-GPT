@@ -14,6 +14,7 @@ import {
   GraphAction,
   buildSeedPrompt,
   extractTextFromParts,
+  getActionKey,
   parseGraphActions,
   serializeGraphForChat,
 } from "./helpers";
@@ -134,10 +135,7 @@ export function useBuilderChatPanel({
     const parsed = parseGraphActions(text);
     const seen = new Set<string>();
     return parsed.filter((action) => {
-      const key =
-        action.type === "update_node_input"
-          ? `${action.nodeId}:${action.key}`
-          : `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
+      const key = getActionKey(action);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;

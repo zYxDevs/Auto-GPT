@@ -12,7 +12,7 @@ import {
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { CustomNode } from "../FlowEditor/nodes/CustomNode/CustomNode";
-import { GraphAction, extractTextFromParts } from "./helpers";
+import { GraphAction, extractTextFromParts, getActionKey } from "./helpers";
 import { useBuilderChatPanel } from "./useBuilderChatPanel";
 
 interface Props {
@@ -38,6 +38,7 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
 
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isStreaming = status === "streaming" || status === "submitted";
   const canSend =
     Boolean(sessionId) && !isCreatingSession && !sessionError && !isStreaming;
@@ -45,6 +46,13 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
+
+  // Move focus to the textarea when the panel opens so keyboard users can type immediately.
+  useEffect(() => {
+    if (isOpen) {
+      textareaRef.current?.focus();
+    }
+  }, [isOpen]);
 
   function handleSend() {
     const text = inputValue.trim();
@@ -93,6 +101,7 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
             onStop={stop}
             isStreaming={isStreaming}
             isDisabled={!canSend}
+            textareaRef={textareaRef}
           />
         </div>
       )}
@@ -235,11 +244,13 @@ function MessageList({
             AI applied these changes
           </p>
           {parsedActions.map((action) => {
-            const key =
-              action.type === "update_node_input"
-                ? `${action.nodeId}:${action.key}`
-                : `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
-            return <ActionItem key={key} action={action} nodes={nodes} />;
+            return (
+              <ActionItem
+                key={getActionKey(action)}
+                action={action}
+                nodes={nodes}
+              />
+            );
           })}
         </div>
       )}
@@ -284,6 +295,7 @@ interface PanelInputProps {
   onStop: () => void;
   isStreaming: boolean;
   isDisabled: boolean;
+  textareaRef?: React.RefObject<HTMLTextAreaElement>;
 }
 
 function PanelInput({
@@ -294,11 +306,13 @@ function PanelInput({
   onStop,
   isStreaming,
   isDisabled,
+  textareaRef,
 }: PanelInputProps) {
   return (
     <div className="border-t border-slate-100 p-3">
       <div className="flex items-end gap-2">
         <textarea
+          ref={textareaRef}
           value={value}
           disabled={isDisabled}
           onChange={(e) => onChange(e.target.value)}

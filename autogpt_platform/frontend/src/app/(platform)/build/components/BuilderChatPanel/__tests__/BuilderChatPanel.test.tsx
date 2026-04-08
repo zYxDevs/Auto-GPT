@@ -6,7 +6,11 @@ import {
 } from "@/tests/integrations/test-utils";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { BuilderChatPanel } from "../BuilderChatPanel";
-import { serializeGraphForChat, parseGraphActions } from "../helpers";
+import {
+  serializeGraphForChat,
+  parseGraphActions,
+  getActionKey,
+} from "../helpers";
 import type { CustomNode } from "../../FlowEditor/nodes/CustomNode/CustomNode";
 import type { CustomEdge } from "../../FlowEditor/edges/CustomEdge";
 
@@ -445,5 +449,30 @@ Here are the changes:
     expect(boolAction?.type === "update_node_input" && boolAction.value).toBe(
       true,
     );
+  });
+});
+
+describe("getActionKey", () => {
+  it("returns nodeId:key for update_node_input", () => {
+    expect(
+      getActionKey({
+        type: "update_node_input",
+        nodeId: "1",
+        key: "query",
+        value: "test",
+      }),
+    ).toBe("1:query");
+  });
+
+  it("returns source:handle->target:handle for connect_nodes", () => {
+    expect(
+      getActionKey({
+        type: "connect_nodes",
+        source: "1",
+        target: "2",
+        sourceHandle: "result",
+        targetHandle: "input",
+      }),
+    ).toBe("1:result->2:input");
   });
 });

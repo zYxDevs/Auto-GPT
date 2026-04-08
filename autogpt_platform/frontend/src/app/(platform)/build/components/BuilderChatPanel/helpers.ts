@@ -98,6 +98,16 @@ export function buildSeedPrompt(summary: string): string {
 }
 
 /**
+ * Returns a stable deduplication key for a GraphAction.
+ * Used for both React list keys and seen-set deduplication in the hook.
+ */
+export function getActionKey(action: GraphAction): string {
+  return action.type === "update_node_input"
+    ? `${action.nodeId}:${action.key}`
+    : `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
+}
+
+/**
  * Extracts the concatenated plain-text content from a message's parts array.
  * Reused in both the hook (action parsing) and the component (rendering).
  */
