@@ -4,6 +4,7 @@ import { environment } from "@/services/environment";
 import { useToast } from "@/components/molecules/Toast/use-toast";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import { MarkerType } from "@xyflow/react";
 import {
   type KeyboardEvent,
   useEffect,
@@ -380,6 +381,13 @@ export function useBuilderChatPanel({
           sourceHandle: action.sourceHandle,
           targetHandle: action.targetHandle,
           type: "custom",
+          // Match the markerEnd style used by addEdge in edgeStore so
+          // chat-applied edges render with the same arrowhead as manually drawn ones.
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            strokeWidth: 2,
+            color: "#555",
+          },
         },
       ]);
     } else {
