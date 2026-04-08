@@ -26,17 +26,11 @@ interface Props {
   isGraphLoaded?: boolean;
 }
 
-/**
- * BuilderChatPanel renders a collapsible AI chat panel for the flow builder.
- * All business logic lives in `useBuilderChatPanel`.
- *
- * `isGraphLoaded` controls when the seed message is sent to the AI — pass
- * `true` only once the graph has finished loading so the AI receives full context.
- */
 export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
   const {
     isOpen,
     handleToggle,
+    retrySession,
     messages,
     stop,
     error,
@@ -99,7 +93,7 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
             parsedActions={parsedActions}
             appliedActionKeys={appliedActionKeys}
             onApplyAction={handleApplyAction}
-            onRetry={handleToggle}
+            onRetry={retrySession}
             seedMessageId={seedMessageId}
             messagesEndRef={messagesEndRef}
           />
@@ -220,11 +214,7 @@ function MessageList({
         <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-600">
           <p>Failed to start chat session.</p>
           <button
-            onClick={() => {
-              onRetry();
-              // Toggle twice: close then reopen to re-trigger session creation
-              setTimeout(onRetry, 50);
-            }}
+            onClick={onRetry}
             className="mt-1 underline hover:no-underline"
           >
             Retry
@@ -305,18 +295,21 @@ function MessageList({
           <p className="text-xs font-medium text-violet-700">
             Suggested changes
           </p>
-          {parsedActions.map((action) => {
-            const key = getActionKey(action);
-            return (
-              <ActionItem
-                key={key}
-                action={action}
-                nodes={nodes}
-                isApplied={appliedActionKeys.has(key)}
-                onApply={onApplyAction}
-              />
-            );
-          })}
+          {(() => {
+            const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+            return parsedActions.map((action) => {
+              const key = getActionKey(action);
+              return (
+                <ActionItem
+                  key={key}
+                  action={action}
+                  nodeMap={nodeMap}
+                  isApplied={appliedActionKeys.has(key)}
+                  onApply={onApplyAction}
+                />
+              );
+            });
+          })()}
         </div>
       )}
 
@@ -327,17 +320,15 @@ function MessageList({
 
 function ActionItem({
   action,
-  nodes,
+  nodeMap,
   isApplied,
   onApply,
 }: {
   action: GraphAction;
-  nodes: CustomNode[];
+  nodeMap: Map<string, CustomNode>;
   isApplied: boolean;
   onApply: (action: GraphAction) => void;
 }) {
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-
   const label =
     action.type === "update_node_input"
       ? `Set "${getNodeDisplayName(nodeMap.get(action.nodeId), action.nodeId)}" "${action.key}" = ${JSON.stringify(action.value)}`

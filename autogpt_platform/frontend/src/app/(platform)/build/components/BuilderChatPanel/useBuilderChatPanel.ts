@@ -1,14 +1,11 @@
 import { postV2CreateSession } from "@/app/api/__generated__/endpoints/chat/chat";
-import { getGetV1GetSpecificGraphQueryKey } from "@/app/api/__generated__/endpoints/graphs/graphs";
 import { getWebSocketToken } from "@/lib/supabase/actions";
 import { environment } from "@/services/environment";
 import { useToast } from "@/components/molecules/Toast/use-toast";
-import { useQueryClient } from "@tanstack/react-query";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import {
   type KeyboardEvent,
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -41,15 +38,6 @@ interface UseBuilderChatPanelArgs {
   isGraphLoaded?: boolean;
 }
 
-/**
- * useBuilderChatPanel manages all business logic for the collapsible AI chat
- * panel in the flow builder. It owns session lifecycle, streaming transport,
- * graph context serialization, action parsing, apply/undo, and input handling.
- *
- * @param isGraphLoaded - When true the seed message is sent automatically.
- *   Pass false (the default) until the graph has finished loading to avoid
- *   sending an empty context to the AI.
- */
 export function useBuilderChatPanel({
   isGraphLoaded = false,
 }: UseBuilderChatPanelArgs = {}) {
@@ -72,7 +60,6 @@ export function useBuilderChatPanel({
   const isCreatingSessionRef = useRef(false);
 
   const [{ flowID }] = useQueryStates({ flowID: parseAsString });
-  const queryClient = useQueryClient();
   const { toast } = useToast();
 
   const nodes = useNodeStore(useShallow((s) => s.nodes));
@@ -233,11 +220,14 @@ export function useBuilderChatPanel({
     Boolean(sessionId) && !isCreatingSession && !sessionError && !isStreaming;
 
   function handleToggle() {
-    // Reset session error when reopening so the panel can retry session creation
-    if (!isOpen && !sessionId) {
-      setSessionError(false);
-    }
     setIsOpen((o) => !o);
+  }
+
+  // Resets session error state so the session-creation effect re-runs on
+  // the next render without toggling the panel closed and back open.
+  function retrySession() {
+    setSessionError(false);
+    isCreatingSessionRef.current = false;
   }
 
   function handleSend() {
@@ -276,8 +266,10 @@ export function useBuilderChatPanel({
         });
         return;
       }
-      // Capture a snapshot before mutating so we can undo.
-      const prevHardcoded = node.data.hardcodedValues;
+      // Deep-clone before mutating so sequential applies to the same node
+      // each capture an independent snapshot — without this, the reference
+      // would point to the same object after mutation.
+      const prevHardcoded = structuredClone(node.data.hardcodedValues);
       const key = getActionKey(action);
       setUndoStack((prev) => [
         ...prev,
@@ -361,29 +353,23 @@ export function useBuilderChatPanel({
       return _;
     }
     setAppliedActionKeys((prev) => new Set([...prev, getActionKey(action)]));
-    if (flowID) {
-      queryClient.invalidateQueries({
-        queryKey: getGetV1GetSpecificGraphQueryKey(flowID),
-      });
-    }
   }
 
-  const handleUndoLastAction = useCallback(() => {
+  function handleUndoLastAction() {
     setUndoStack((prev) => {
       if (prev.length === 0) return prev;
       const last = prev[prev.length - 1];
       last.restore();
       return prev.slice(0, -1);
     });
-  }, []);
+  }
 
   return {
     isOpen,
     handleToggle,
+    retrySession,
     messages,
-    sendMessage,
     stop,
-    status,
     error,
     isCreatingSession,
     sessionError,

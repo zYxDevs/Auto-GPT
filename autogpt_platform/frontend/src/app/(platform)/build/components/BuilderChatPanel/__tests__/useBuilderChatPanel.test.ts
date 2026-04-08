@@ -60,12 +60,14 @@ vi.mock("@/components/molecules/Toast/use-toast", () => ({
 
 const mockSendMessage = vi.fn();
 const mockStop = vi.fn();
+let mockChatMessages: unknown[] = [];
+let mockChatStatus = "ready";
 vi.mock("@ai-sdk/react", () => ({
   useChat: () => ({
-    messages: [],
+    messages: mockChatMessages,
     sendMessage: mockSendMessage,
     stop: mockStop,
-    status: "ready",
+    status: mockChatStatus,
     error: undefined,
   }),
 }));
@@ -91,6 +93,8 @@ beforeEach(() => {
   mockFlowID = null;
   mockNodes.length = 0;
   mockEdges.length = 0;
+  mockChatMessages = [];
+  mockChatStatus = "ready";
   mockUpdateNodeData.mockClear();
   mockAddEdge.mockClear();
   mockRemoveEdge.mockClear();
@@ -306,8 +310,8 @@ describe("useBuilderChatPanel – flowID reset", () => {
   });
 });
 
-describe("useBuilderChatPanel – cache invalidation", () => {
-  it("invalidates graph query cache after applying an update_node_input action", () => {
+describe("useBuilderChatPanel – apply does not trigger cache refetch", () => {
+  it("does NOT call invalidateQueries after applying an update_node_input action (prevents refetch overwriting local state)", () => {
     mockNodes.push({
       id: "n1",
       data: { hardcodedValues: { existing: "val" } },
@@ -322,44 +326,6 @@ describe("useBuilderChatPanel – cache invalidation", () => {
         nodeId: "n1",
         key: "query",
         value: "new val",
-      });
-    });
-
-    expect(mockInvalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["graphs", "flow-cache"],
-    });
-  });
-
-  it("invalidates graph query cache after applying a connect_nodes action", () => {
-    mockNodes.push({ id: "src", data: {} }, { id: "tgt", data: {} });
-    mockFlowID = "flow-edges";
-
-    const { result } = renderHook(() => useBuilderChatPanel());
-
-    act(() => {
-      result.current.handleApplyAction({
-        type: "connect_nodes",
-        source: "src",
-        target: "tgt",
-        sourceHandle: "out",
-        targetHandle: "in",
-      });
-    });
-
-    expect(mockInvalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["graphs", "flow-edges"],
-    });
-  });
-
-  it("does NOT invalidate cache when validation fails (node not found)", () => {
-    const { result } = renderHook(() => useBuilderChatPanel());
-
-    act(() => {
-      result.current.handleApplyAction({
-        type: "update_node_input",
-        nodeId: "nonexistent",
-        key: "query",
-        value: "test",
       });
     });
 
@@ -691,5 +657,164 @@ describe("useBuilderChatPanel – undo", () => {
     expect(mockRemoveEdge).toHaveBeenCalledWith("src:out->tgt:in");
     expect(result.current.undoStack).toHaveLength(0);
     expect(result.current.appliedActionKeys.size).toBe(0);
+  });
+});
+
+describe("useBuilderChatPanel – parsedActions integration", () => {
+  it("returns parsed actions from assistant messages when status is ready", () => {
+    mockChatMessages = [
+      {
+        id: "msg-1",
+        role: "assistant",
+        parts: [
+          {
+            type: "text",
+            text: '```json\n{"action":"update_node_input","node_id":"n1","key":"query","value":"AI news"}\n```',
+          },
+        ],
+      },
+    ];
+    mockChatStatus = "ready";
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    expect(result.current.parsedActions).toHaveLength(1);
+    expect(result.current.parsedActions[0]).toEqual({
+      type: "update_node_input",
+      nodeId: "n1",
+      key: "query",
+      value: "AI news",
+    });
+  });
+
+  it("returns empty parsedActions when status is streaming", () => {
+    mockChatMessages = [
+      {
+        id: "msg-1",
+        role: "assistant",
+        parts: [
+          {
+            type: "text",
+            text: '```json\n{"action":"update_node_input","node_id":"n1","key":"query","value":"AI news"}\n```',
+          },
+        ],
+      },
+    ];
+    mockChatStatus = "streaming";
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    expect(result.current.parsedActions).toHaveLength(0);
+  });
+
+  it("deduplicates identical actions from multiple assistant messages", () => {
+    const actionBlock =
+      '```json\n{"action":"update_node_input","node_id":"n1","key":"query","value":"AI news"}\n```';
+    mockChatMessages = [
+      {
+        id: "msg-1",
+        role: "assistant",
+        parts: [{ type: "text", text: actionBlock }],
+      },
+      {
+        id: "msg-2",
+        role: "assistant",
+        parts: [{ type: "text", text: actionBlock }],
+      },
+    ];
+    mockChatStatus = "ready";
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    expect(result.current.parsedActions).toHaveLength(1);
+  });
+});
+
+describe("useBuilderChatPanel – Escape key handler", () => {
+  it("closes the panel when Escape is pressed while open", () => {
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleToggle();
+    });
+    expect(result.current.isOpen).toBe(true);
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(result.current.isOpen).toBe(false);
+  });
+
+  it("does not error when Escape is pressed while panel is closed", () => {
+    const { result } = renderHook(() => useBuilderChatPanel());
+    expect(result.current.isOpen).toBe(false);
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+
+    expect(result.current.isOpen).toBe(false);
+  });
+});
+
+describe("useBuilderChatPanel – retrySession", () => {
+  it("clears sessionError so the session-creation effect can re-run", async () => {
+    mockPostV2CreateSession.mockRejectedValueOnce(new Error("network error"));
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+    expect(result.current.sessionError).toBe(true);
+
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-retry" },
+    });
+
+    await act(async () => {
+      result.current.retrySession();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(result.current.sessionError).toBe(false);
+    expect(result.current.sessionId).toBe("sess-retry");
+  });
+});
+
+describe("useBuilderChatPanel – handleSend", () => {
+  it("clears inputValue after sending when session is ready", async () => {
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-send" },
+    });
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    act(() => {
+      result.current.setInputValue("hello world");
+    });
+
+    act(() => {
+      result.current.handleSend();
+    });
+
+    expect(result.current.inputValue).toBe("");
+    expect(mockSendMessage).toHaveBeenCalledWith({ text: "hello world" });
+  });
+
+  it("does not send when inputValue is whitespace only", () => {
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.setInputValue("   ");
+    });
+
+    act(() => {
+      result.current.handleSend();
+    });
+
+    expect(mockSendMessage).not.toHaveBeenCalled();
   });
 });

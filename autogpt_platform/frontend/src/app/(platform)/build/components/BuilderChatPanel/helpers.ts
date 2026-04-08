@@ -124,8 +124,8 @@ export function buildSeedPrompt(summary: string): string {
     `To add a connection between nodes:\n` +
     `\`\`\`json\n{"action": "connect_nodes", "source": "<source node id>", "target": "<target node id>", "source_handle": "<output handle name>", "target_handle": "<input handle name>"}\n\`\`\`\n\n` +
     `Rules: the "action" key is required and must be exactly "update_node_input" or "connect_nodes". ` +
-    `Do not use any other field names (e.g. "block", "change", "field", "from", "to" are NOT valid).\n\n` +
-    `What does this agent do?`
+    `Do not use any other field names (e.g. "block", "change", "field", "from", "to" are NOT valid). ` +
+    `Ask me what you'd like to know about or change in this agent.`
   );
 }
 

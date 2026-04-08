@@ -32,10 +32,9 @@ function makeMockHook(
   return {
     isOpen: false,
     handleToggle: vi.fn(),
+    retrySession: vi.fn(),
     messages: [],
-    sendMessage: vi.fn(),
     stop: vi.fn(),
-    status: "ready",
     error: undefined,
     isCreatingSession: false,
     sessionError: false,
@@ -335,12 +334,15 @@ describe("BuilderChatPanel", () => {
   });
 
   it("shows session error message with Retry when sessionError is true", () => {
+    const retrySession = vi.fn();
     mockUseBuilderChatPanel.mockReturnValue(
-      makeMockHook({ isOpen: true, sessionError: true }),
+      makeMockHook({ isOpen: true, sessionError: true, retrySession }),
     );
     render(<BuilderChatPanel />);
     expect(screen.getByText(/Failed to start chat session/i)).toBeDefined();
     expect(screen.getByText("Retry")).toBeDefined();
+    fireEvent.click(screen.getByText("Retry"));
+    expect(retrySession).toHaveBeenCalledOnce();
   });
 
   it("renders the panel with role=dialog and message list with role=log", () => {
@@ -751,9 +753,15 @@ describe("buildSeedPrompt", () => {
     expect(result).toContain('"action": "connect_nodes"');
   });
 
-  it("ends with a question to prompt an AI response", () => {
+  it("ends with a prompt inviting the user to interact", () => {
     const result = buildSeedPrompt("");
-    expect(result.trim().endsWith("What does this agent do?")).toBe(true);
+    expect(
+      result
+        .trim()
+        .endsWith(
+          "Ask me what you'd like to know about or change in this agent.",
+        ),
+    ).toBe(true);
   });
 });
 
