@@ -848,4 +848,300 @@ describe("useBuilderChatPanel – handleSend", () => {
 
     expect(mockSendMessage).not.toHaveBeenCalled();
   });
+
+  it("does not send when canSend is false (sessionError=true)", async () => {
+    mockPostV2CreateSession.mockRejectedValue(new Error("fail"));
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+    expect(result.current.sessionError).toBe(true);
+    expect(result.current.canSend).toBe(false);
+
+    act(() => {
+      result.current.setInputValue("hello");
+    });
+
+    act(() => {
+      result.current.handleSend();
+    });
+
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("useBuilderChatPanel – handleKeyDown", () => {
+  it("calls handleSend on Enter without Shift when canSend is true", async () => {
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-kd" },
+    });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    act(() => {
+      result.current.setInputValue("test message");
+    });
+
+    const mockPreventDefault = vi.fn();
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Enter",
+        shiftKey: false,
+        preventDefault: mockPreventDefault,
+      } as unknown as import("react").KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    expect(mockPreventDefault).toHaveBeenCalled();
+    expect(mockSendMessage).toHaveBeenCalledWith({ text: "test message" });
+  });
+
+  it("does NOT call handleSend on Shift+Enter (allows newline insertion)", async () => {
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-shift" },
+    });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    act(() => {
+      result.current.setInputValue("multiline");
+    });
+
+    const mockPreventDefault = vi.fn();
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Enter",
+        shiftKey: true,
+        preventDefault: mockPreventDefault,
+      } as unknown as import("react").KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    expect(mockPreventDefault).not.toHaveBeenCalled();
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("useBuilderChatPanel – schema-absent nodes", () => {
+  it("update_node_input: allows any key when node has no inputSchema (permissive mode)", () => {
+    mockNodes.push({
+      id: "schema-less",
+      data: { hardcodedValues: {} },
+      // No inputSchema at all
+    });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "update_node_input",
+        nodeId: "schema-less",
+        key: "any_key",
+        value: "any_value",
+      });
+    });
+
+    // Without a schema, validation is skipped — the key is applied permissively
+    expect(mockSetNodes).toHaveBeenCalledWith([
+      {
+        id: "schema-less",
+        data: { hardcodedValues: { any_key: "any_value" } },
+      },
+    ]);
+    expect(mockToast).not.toHaveBeenCalled();
+  });
+
+  it("connect_nodes: allows connection when source node has no outputSchema (permissive mode)", () => {
+    mockNodes.push(
+      { id: "src-no-schema", data: {} }, // no outputSchema
+      {
+        id: "tgt-has-schema",
+        data: { inputSchema: { properties: { input: {} } } },
+      },
+    );
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "connect_nodes",
+        source: "src-no-schema",
+        target: "tgt-has-schema",
+        sourceHandle: "any_output",
+        targetHandle: "input",
+      });
+    });
+
+    // Without an outputSchema, sourceHandle validation is skipped
+    expect(mockSetEdges).toHaveBeenCalled();
+    expect(mockToast).not.toHaveBeenCalled();
+  });
+
+  it("connect_nodes: allows connection when target node has no inputSchema (permissive mode)", () => {
+    mockNodes.push(
+      {
+        id: "src-has-schema",
+        data: { outputSchema: { properties: { output: {} } } },
+      },
+      { id: "tgt-no-schema", data: {} }, // no inputSchema
+    );
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "connect_nodes",
+        source: "src-has-schema",
+        target: "tgt-no-schema",
+        sourceHandle: "output",
+        targetHandle: "any_input",
+      });
+    });
+
+    // Without an inputSchema, targetHandle validation is skipped
+    expect(mockSetEdges).toHaveBeenCalled();
+    expect(mockToast).not.toHaveBeenCalled();
+  });
+});
+
+describe("useBuilderChatPanel – sequential multi-undo (LIFO order)", () => {
+  it("undoes two applied actions in LIFO order, restoring correct state at each step", () => {
+    const initialNode = {
+      id: "n1",
+      data: { hardcodedValues: { x: "original" } },
+    };
+    mockNodes.push(initialNode);
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    // Apply first action
+    act(() => {
+      result.current.handleApplyAction({
+        type: "update_node_input",
+        nodeId: "n1",
+        key: "x",
+        value: "first_change",
+      });
+    });
+    expect(result.current.undoStack).toHaveLength(1);
+
+    // Apply second action
+    act(() => {
+      result.current.handleApplyAction({
+        type: "update_node_input",
+        nodeId: "n1",
+        key: "x",
+        value: "second_change",
+      });
+    });
+    expect(result.current.undoStack).toHaveLength(2);
+
+    // Undo second action — should restore to snapshot taken before second action
+    // (which captured the state after first action, i.e. mockNodes at that point)
+    mockSetNodes.mockClear();
+    act(() => {
+      result.current.handleUndoLastAction();
+    });
+    expect(result.current.undoStack).toHaveLength(1);
+    // setNodes called with the snapshot captured before second action applied
+    expect(mockSetNodes).toHaveBeenCalledOnce();
+
+    // Undo first action — should restore to snapshot taken before first action
+    mockSetNodes.mockClear();
+    act(() => {
+      result.current.handleUndoLastAction();
+    });
+    expect(result.current.undoStack).toHaveLength(0);
+    expect(mockSetNodes).toHaveBeenCalledWith([initialNode]);
+  });
+});
+
+describe("useBuilderChatPanel – duplicate edge guard", () => {
+  it("does not append duplicate edge when same connect_nodes action is applied twice", () => {
+    mockNodes.push({ id: "src", data: {} }, { id: "tgt", data: {} });
+
+    const action = {
+      type: "connect_nodes" as const,
+      source: "src",
+      target: "tgt",
+      sourceHandle: "out",
+      targetHandle: "in",
+    };
+
+    // Simulate the edge store updating when setEdges is called
+    const newEdge = {
+      id: "src:out->tgt:in",
+      source: "src",
+      target: "tgt",
+      sourceHandle: "out",
+      targetHandle: "in",
+      type: "custom",
+    };
+    mockSetEdges.mockImplementationOnce((edges: unknown[]) => {
+      mockEdges.push(...edges);
+    });
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction(action);
+    });
+
+    expect(mockSetEdges).toHaveBeenCalledOnce();
+    expect(result.current.appliedActionKeys.size).toBe(1);
+    // Verify the edge is now in the mock store
+    expect(mockEdges).toContainEqual(expect.objectContaining(newEdge));
+
+    // Second apply of the same action — should not call setEdges again
+    mockSetEdges.mockClear();
+    act(() => {
+      result.current.handleApplyAction(action);
+    });
+
+    // setEdges should NOT be called again — the edge already exists in the store
+    expect(mockSetEdges).not.toHaveBeenCalled();
+    // But appliedActionKeys should still contain the key
+    expect(result.current.appliedActionKeys.size).toBe(1);
+  });
+});
+
+describe("useBuilderChatPanel – undo stack size cap", () => {
+  it("caps the undo stack at MAX_UNDO (20) entries, dropping the oldest", () => {
+    // Push 21 nodes so each apply action targets a unique node
+    for (let i = 0; i <= 20; i++) {
+      mockNodes.push({ id: `n${i}`, data: { hardcodedValues: {} } });
+    }
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    // Apply 21 actions
+    for (let i = 0; i <= 20; i++) {
+      act(() => {
+        result.current.handleApplyAction({
+          type: "update_node_input",
+          nodeId: `n${i}`,
+          key: "v",
+          value: `val${i}`,
+        });
+      });
+    }
+
+    // Stack should be capped at 20
+    expect(result.current.undoStack).toHaveLength(20);
+  });
+});
+
+describe("useBuilderChatPanel – handleUndoLastAction on empty stack", () => {
+  it("does nothing when undoStack is empty", () => {
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    expect(result.current.undoStack).toHaveLength(0);
+
+    // Should not throw or call setNodes/setEdges
+    act(() => {
+      result.current.handleUndoLastAction();
+    });
+
+    expect(mockSetNodes).not.toHaveBeenCalled();
+    expect(mockSetEdges).not.toHaveBeenCalled();
+    expect(result.current.undoStack).toHaveLength(0);
+  });
 });

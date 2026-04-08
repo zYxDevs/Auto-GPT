@@ -28,6 +28,9 @@ import {
 
 type SendMessageFn = ReturnType<typeof useChat>["sendMessage"];
 
+/** Maximum number of undo entries to keep. Oldest entries are dropped when the limit is reached. */
+const MAX_UNDO = 20;
+
 /** Snapshot of node data taken before an action is applied, enabling undo. */
 interface UndoSnapshot {
   actionKey: string;
@@ -285,9 +288,8 @@ export function useBuilderChatPanel({
           : n,
       );
       const key = getActionKey(action);
-      setUndoStack((prev) => [
-        ...prev,
-        {
+      setUndoStack((prev) => {
+        const entry: UndoSnapshot = {
           actionKey: key,
           restore: () => {
             setNodes(prevNodes);
@@ -297,8 +299,10 @@ export function useBuilderChatPanel({
               return next;
             });
           },
-        },
-      ]);
+        };
+        const trimmed = prev.length >= MAX_UNDO ? prev.slice(1) : prev;
+        return [...trimmed, entry];
+      });
       setNodes(nextNodes);
     } else if (action.type === "connect_nodes") {
       const sourceNode = nodes.find((n) => n.id === action.source);
@@ -335,10 +339,25 @@ export function useBuilderChatPanel({
       // restore use setEdges (not addEdge/removeEdge) to bypass the global
       // history store — keeps chat-panel changes separate from Ctrl+Z.
       const prevEdges = useEdgeStore.getState().edges;
+      // Guard against duplicate edges — the same connection may appear after an
+      // undo-then-reapply or from identical suggestions across AI messages.
+      const alreadyExists = prevEdges.some(
+        (e) =>
+          e.source === action.source &&
+          e.target === action.target &&
+          e.sourceHandle === action.sourceHandle &&
+          e.targetHandle === action.targetHandle,
+      );
+      if (alreadyExists) {
+        // Edge already present — mark as applied without duplicating it.
+        setAppliedActionKeys(
+          (prev) => new Set([...prev, getActionKey(action)]),
+        );
+        return;
+      }
       const key = getActionKey(action);
-      setUndoStack((prev) => [
-        ...prev,
-        {
+      setUndoStack((prev) => {
+        const entry: UndoSnapshot = {
           actionKey: key,
           restore: () => {
             setEdges(prevEdges);
@@ -348,8 +367,10 @@ export function useBuilderChatPanel({
               return next;
             });
           },
-        },
-      ]);
+        };
+        const trimmed = prev.length >= MAX_UNDO ? prev.slice(1) : prev;
+        return [...trimmed, entry];
+      });
       setEdges([
         ...prevEdges,
         {
@@ -370,12 +391,15 @@ export function useBuilderChatPanel({
   }
 
   function handleUndoLastAction() {
-    setUndoStack((prev) => {
-      if (prev.length === 0) return prev;
-      const last = prev[prev.length - 1];
-      last.restore();
-      return prev.slice(0, -1);
-    });
+    // Read the current stack directly rather than inside the setUndoStack updater.
+    // Calling restore() (which triggers setNodes/setEdges) inside a state updater
+    // is a React anti-pattern — state updaters must be pure. Reading from the ref
+    // here is safe because this function is only called from event handlers.
+    const stack = undoStack;
+    if (stack.length === 0) return;
+    const last = stack[stack.length - 1];
+    last.restore();
+    setUndoStack((prev) => prev.slice(0, -1));
   }
 
   return {

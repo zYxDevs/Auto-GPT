@@ -76,6 +76,7 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
         <div
           role="dialog"
           aria-label="Builder chat panel"
+          aria-modal="true"
           className="pointer-events-auto flex h-[70vh] w-96 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
         >
           <PanelHeader
@@ -113,13 +114,14 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
 
       <button
         onClick={handleToggle}
+        aria-expanded={isOpen}
+        aria-label={isOpen ? "Close chat" : "Chat with builder"}
         className={cn(
           "pointer-events-auto flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-colors",
           isOpen
             ? "bg-slate-800 text-white hover:bg-slate-700"
             : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
         )}
-        aria-label={isOpen ? "Close chat" : "Chat with builder"}
       >
         {isOpen ? <X size={20} /> : <ChatCircle size={22} weight="fill" />}
       </button>
@@ -291,29 +293,46 @@ function MessageList({
       })}
 
       {parsedActions.length > 0 && (
-        <div className="space-y-2 rounded-lg border border-violet-100 bg-violet-50 p-3">
-          <p className="text-xs font-medium text-violet-700">
-            Suggested changes
-          </p>
-          {(() => {
-            const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-            return parsedActions.map((action) => {
-              const key = getActionKey(action);
-              return (
-                <ActionItem
-                  key={key}
-                  action={action}
-                  nodeMap={nodeMap}
-                  isApplied={appliedActionKeys.has(key)}
-                  onApply={onApplyAction}
-                />
-              );
-            });
-          })()}
-        </div>
+        <ActionList
+          parsedActions={parsedActions}
+          nodes={nodes}
+          appliedActionKeys={appliedActionKeys}
+          onApplyAction={onApplyAction}
+        />
       )}
 
       <div ref={messagesEndRef} />
+    </div>
+  );
+}
+
+function ActionList({
+  parsedActions,
+  nodes,
+  appliedActionKeys,
+  onApplyAction,
+}: {
+  parsedActions: GraphAction[];
+  nodes: CustomNode[];
+  appliedActionKeys: Set<string>;
+  onApplyAction: (action: GraphAction) => void;
+}) {
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  return (
+    <div className="space-y-2 rounded-lg border border-violet-100 bg-violet-50 p-3">
+      <p className="text-xs font-medium text-violet-700">Suggested changes</p>
+      {parsedActions.map((action) => {
+        const key = getActionKey(action);
+        return (
+          <ActionItem
+            key={key}
+            action={action}
+            nodeMap={nodeMap}
+            isApplied={appliedActionKeys.has(key)}
+            onApply={onApplyAction}
+          />
+        );
+      })}
     </div>
   );
 }
