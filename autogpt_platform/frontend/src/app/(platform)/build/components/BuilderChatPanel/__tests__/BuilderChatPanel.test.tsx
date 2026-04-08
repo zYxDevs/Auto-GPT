@@ -133,7 +133,7 @@ describe("BuilderChatPanel", () => {
     expect(screen.getByText("Applied")).toBeDefined();
   });
 
-  it("shows pre-applied actions as a static badge", () => {
+  it("shows applied badge for actions", () => {
     const action = {
       type: "update_node_input" as const,
       nodeId: "1",
@@ -147,7 +147,7 @@ describe("BuilderChatPanel", () => {
       }),
     );
     render(<BuilderChatPanel />);
-    expect(screen.getByRole("button", { name: "Applied" })).toBeDefined();
+    expect(screen.getByText("Applied")).toBeDefined();
   });
 
   it("calls sendMessage when the user submits a message", () => {

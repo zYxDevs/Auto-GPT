@@ -101,8 +101,8 @@ export function buildSeedPrompt(summary: string): string {
  * Extracts the concatenated plain-text content from a message's parts array.
  * Reused in both the hook (action parsing) and the component (rendering).
  */
-export function getMessageText(
-  parts: Array<{ type: string; text?: string }>,
+export function extractTextFromParts(
+  parts: ReadonlyArray<{ type: string; text?: string }>,
 ): string {
   return parts
     .filter((p): p is { type: "text"; text: string } => p.type === "text")

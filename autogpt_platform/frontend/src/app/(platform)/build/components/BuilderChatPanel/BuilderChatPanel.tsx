@@ -12,7 +12,7 @@ import {
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { CustomNode } from "../FlowEditor/nodes/CustomNode/CustomNode";
-import { GraphAction } from "./helpers";
+import { GraphAction, extractTextFromParts } from "./helpers";
 import { useBuilderChatPanel } from "./useBuilderChatPanel";
 
 interface Props {
@@ -34,18 +34,14 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
     sessionId,
     nodes,
     parsedActions,
-    handleApplyAction,
   } = useBuilderChatPanel({ isGraphLoaded });
 
   const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isStreaming = status === "streaming" || status === "submitted";
-  // Block input until the session is ready to prevent messages being sent
-  // before the seed context has been delivered to the AI.
   const canSend =
     Boolean(sessionId) && !isCreatingSession && !sessionError && !isStreaming;
 
-  // Scroll to bottom whenever a new message lands (AI response or user send)
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
@@ -86,7 +82,6 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
             streamError={error}
             nodes={nodes}
             parsedActions={parsedActions}
-            onApplyAction={handleApplyAction}
             messagesEndRef={messagesEndRef}
           />
 
@@ -141,7 +136,6 @@ interface MessageListProps {
   streamError: Error | undefined;
   nodes: CustomNode[];
   parsedActions: GraphAction[];
-  onApplyAction: (action: GraphAction) => void;
   messagesEndRef: React.RefObject<HTMLDivElement>;
 }
 
@@ -152,18 +146,11 @@ function MessageList({
   streamError,
   nodes,
   parsedActions,
-  onApplyAction,
   messagesEndRef,
 }: MessageListProps) {
-  const visibleMessages = messages.filter((msg) => {
-    const text = msg.parts
-      .filter(
-        (p): p is Extract<typeof p, { type: "text" }> => p.type === "text",
-      )
-      .map((p) => p.text)
-      .join("");
-    return Boolean(text);
-  });
+  const visibleMessages = messages.filter((msg) =>
+    Boolean(extractTextFromParts(msg.parts)),
+  );
 
   return (
     <div
@@ -175,7 +162,7 @@ function MessageList({
       {isCreatingSession && (
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <SpinnerGap size={14} className="animate-spin" />
-          <span>Setting up chat session…</span>
+          <span>Setting up chat session...</span>
         </div>
       )}
 
@@ -196,19 +183,14 @@ function MessageList({
           <ChatCircle size={28} weight="duotone" className="text-violet-300" />
           <p>Ask me to explain or modify your agent.</p>
           <p className="text-slate-300">
-            You can say things like &ldquo;What does this agent do?&rdquo; or
-            &ldquo;Add a step that formats the output.&rdquo;
+            You can say things like "What does this agent do?" or "Add a step
+            that formats the output."
           </p>
         </div>
       )}
 
       {visibleMessages.map((msg) => {
-        const textParts = msg.parts
-          .filter(
-            (p): p is Extract<typeof p, { type: "text" }> => p.type === "text",
-          )
-          .map((p) => p.text)
-          .join("");
+        const textParts = extractTextFromParts(msg.parts);
 
         return (
           <div
@@ -257,14 +239,7 @@ function MessageList({
               action.type === "update_node_input"
                 ? `${action.nodeId}:${action.key}`
                 : `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
-            return (
-              <ActionItem
-                key={key}
-                action={action}
-                nodes={nodes}
-                onApply={() => onApplyAction(action)}
-              />
-            );
+            return <ActionItem key={key} action={action} nodes={nodes} />;
           })}
         </div>
       )}
@@ -277,11 +252,9 @@ function MessageList({
 function ActionItem({
   action,
   nodes,
-  onApply,
 }: {
   action: GraphAction;
   nodes: CustomNode[];
-  onApply: () => void;
 }) {
   const nodeName = (id: string) =>
     nodes.find((n) => n.id === id)?.data.metadata?.customized_name ||
@@ -291,18 +264,14 @@ function ActionItem({
   const label =
     action.type === "update_node_input"
       ? `Set "${nodeName(action.nodeId)}" "${action.key}" = ${JSON.stringify(action.value)}`
-      : `Connect "${nodeName(action.source)}" → "${nodeName(action.target)}"`;
+      : `Connect "${nodeName(action.source)}" -> "${nodeName(action.target)}"`;
 
   return (
     <div className="flex items-start justify-between gap-2 rounded bg-white p-2 text-xs shadow-sm">
       <span className="leading-tight text-slate-700">{label}</span>
-      <button
-        onClick={onApply}
-        className="shrink-0 rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
-        aria-label="Applied"
-      >
+      <span className="shrink-0 rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
         Applied
-      </button>
+      </span>
     </div>
   );
 }
@@ -334,7 +303,7 @@ function PanelInput({
           disabled={isDisabled}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Ask about your agent… (Enter to send, Shift+Enter for newline)"
+          placeholder="Ask about your agent... (Enter to send, Shift+Enter for newline)"
           rows={2}
           className="flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-200 disabled:opacity-50"
         />

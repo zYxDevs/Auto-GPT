@@ -13,7 +13,7 @@ import { useNodeStore } from "../../stores/nodeStore";
 import {
   GraphAction,
   buildSeedPrompt,
-  getMessageText,
+  extractTextFromParts,
   parseGraphActions,
   serializeGraphForChat,
 } from "./helpers";
@@ -54,9 +54,9 @@ export function useBuilderChatPanel({
 
   useEffect(() => {
     if (!isOpen || sessionId || isCreatingSession || sessionError) return;
-    // The `ignore` flag prevents state updates after the component unmounts or
-    // the effect re-runs, avoiding React "update on unmounted component" warnings.
-    let ignore = false;
+    // The `cancelled` flag prevents state updates after the component unmounts
+    // or the effect re-runs, avoiding stale state from async calls.
+    let cancelled = false;
 
     async function createSession() {
       setIsCreatingSession(true);
@@ -65,22 +65,22 @@ export function useBuilderChatPanel({
         // session before allowing any messages — session IDs alone are not
         // sufficient for unauthorized access.
         const res = await postV2CreateSession(null);
-        if (ignore) return;
+        if (cancelled) return;
         if (res.status === 200) {
           setSessionId(res.data.id);
         } else {
           setSessionError(true);
         }
       } catch {
-        if (!ignore) setSessionError(true);
+        if (!cancelled) setSessionError(true);
       } finally {
-        if (!ignore) setIsCreatingSession(false);
+        if (!cancelled) setIsCreatingSession(false);
       }
     }
 
     createSession();
     return () => {
-      ignore = true;
+      cancelled = true;
     };
   }, [isOpen, sessionId, isCreatingSession, sessionError]);
 
@@ -96,7 +96,7 @@ export function useBuilderChatPanel({
                 throw new Error(
                   "Authentication failed — please sign in again.",
                 );
-              const messageText = getMessageText(last.parts ?? []);
+              const messageText = extractTextFromParts(last.parts ?? []);
               return {
                 body: {
                   message: messageText,
@@ -130,7 +130,7 @@ export function useBuilderChatPanel({
     const assistantMessages = messages.filter((m) => m.role === "assistant");
     const last = assistantMessages[assistantMessages.length - 1];
     if (!last) return [];
-    const text = getMessageText(last.parts ?? []);
+    const text = extractTextFromParts(last.parts);
     const parsed = parseGraphActions(text);
     const seen = new Set<string>();
     return parsed.filter((action) => {
@@ -198,9 +198,9 @@ export function useBuilderChatPanel({
       });
     } else if (action.type === "connect_nodes") {
       // Validate both nodes exist before adding the edge to prevent dangling edges
-      const sourceNode = nodes.find((n) => n.id === action.source);
-      const targetNode = nodes.find((n) => n.id === action.target);
-      if (!sourceNode || !targetNode) return;
+      const sourceExists = nodes.some((n) => n.id === action.source);
+      const targetExists = nodes.some((n) => n.id === action.target);
+      if (!sourceExists || !targetExists) return;
       addEdge({
         id: `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`,
         source: action.source,
