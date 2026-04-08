@@ -154,7 +154,7 @@ export function useBuilderChatPanel({
     [sessionId],
   );
 
-  const { messages, sendMessage, stop, status, error } = useChat({
+  const { messages, setMessages, sendMessage, stop, status, error } = useChat({
     id: sessionId ?? undefined,
     transport: transport ?? undefined,
   });
@@ -162,6 +162,13 @@ export function useBuilderChatPanel({
   // Keep a stable ref so the initialization effect can call sendMessage
   // without including it in the deps array (avoids re-triggering the effect).
   sendMessageRef.current = sendMessage;
+
+  // Clear messages from useChat when navigating to a different graph so stale
+  // context from the prior session is not briefly visible in the panel UI.
+  useEffect(() => {
+    setMessages([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flowID]);
 
   // ID of the seed message sent on panel open. Matched by content prefix rather
   // than message position so user messages are never accidentally suppressed.

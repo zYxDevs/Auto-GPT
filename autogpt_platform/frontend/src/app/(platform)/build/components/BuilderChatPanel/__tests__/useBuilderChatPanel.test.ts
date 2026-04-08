@@ -67,12 +67,14 @@ vi.mock("@/components/molecules/Toast/use-toast", () => ({
 }));
 
 const mockSendMessage = vi.fn();
+const mockSetMessages = vi.fn();
 const mockStop = vi.fn();
 let mockChatMessages: unknown[] = [];
 let mockChatStatus = "ready";
 vi.mock("@ai-sdk/react", () => ({
   useChat: () => ({
     messages: mockChatMessages,
+    setMessages: mockSetMessages,
     sendMessage: mockSendMessage,
     stop: mockStop,
     status: mockChatStatus,
@@ -108,6 +110,7 @@ beforeEach(() => {
   mockPostV2CreateSession.mockClear();
   mockInvalidateQueries.mockClear();
   mockSendMessage.mockClear();
+  mockSetMessages.mockClear();
   mockToast.mockClear();
 });
 
