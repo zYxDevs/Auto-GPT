@@ -178,6 +178,16 @@ describe("BuilderChatPanel", () => {
     expect(handleApplyAction).toHaveBeenCalledWith(action);
   });
 
+  it("does not call sendMessage when the textarea is empty", () => {
+    const sendMessage = vi.fn();
+    mockUseBuilderChatPanel.mockReturnValue(
+      makeMockHook({ isOpen: true, sessionId: "sess-1", sendMessage }),
+    );
+    render(<BuilderChatPanel />);
+    fireEvent.click(screen.getByLabelText("Send"));
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it("calls sendMessage when the user submits a message", () => {
     const sendMessage = vi.fn();
     mockUseBuilderChatPanel.mockReturnValue(

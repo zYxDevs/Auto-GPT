@@ -64,18 +64,24 @@ vi.mock("@ai-sdk/react", () => ({
 }));
 
 vi.mock("ai", () => ({
-  DefaultChatTransport: vi.fn().mockImplementation(() => ({})),
+  // Must be a regular function (not an arrow) so it is constructible via `new`.
+  DefaultChatTransport: vi.fn().mockImplementation(function () {
+    return {};
+  }),
 }));
+
+let mockFlowID: string | null = null;
 
 vi.mock("nuqs", () => ({
   parseAsString: { withDefault: (d: string) => d },
-  useQueryStates: () => [{ flowID: null }, vi.fn()],
+  useQueryStates: () => [{ flowID: mockFlowID }, vi.fn()],
 }));
 
 // Import after mocks
 import { useBuilderChatPanel } from "../useBuilderChatPanel";
 
 beforeEach(() => {
+  mockFlowID = null;
   mockNodes.length = 0;
   mockEdges.length = 0;
   mockUpdateNodeData.mockClear();
@@ -337,5 +343,94 @@ describe("useBuilderChatPanel – initial state", () => {
       result.current.handleToggle();
     });
     expect(result.current.isOpen).toBe(false);
+  });
+});
+
+// Flush all pending microtasks + one macrotask so async effects inside `act`
+// have time to resolve their awaited promises and commit state updates.
+async function openAndFlush(toggle: () => void) {
+  await act(async () => {
+    toggle();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+describe("useBuilderChatPanel – session lifecycle", () => {
+  it("creates session and sets sessionId when panel is opened", async () => {
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-1" },
+    });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    expect(result.current.sessionId).toBe("sess-1");
+    expect(result.current.isCreatingSession).toBe(false);
+    expect(result.current.sessionError).toBe(false);
+  });
+
+  it("sets sessionError when session creation request fails", async () => {
+    mockPostV2CreateSession.mockRejectedValue(new Error("network error"));
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    expect(result.current.sessionError).toBe(true);
+    expect(result.current.isCreatingSession).toBe(false);
+    expect(result.current.sessionId).toBeNull();
+  });
+
+  it("sets sessionError when session creation returns non-200", async () => {
+    mockPostV2CreateSession.mockResolvedValue({ status: 500, data: {} });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    expect(result.current.sessionError).toBe(true);
+  });
+});
+
+describe("useBuilderChatPanel – flowID reset", () => {
+  it("resets appliedActionKeys when flowID changes", () => {
+    mockNodes.push({ id: "n1", data: { hardcodedValues: {} } });
+    mockFlowID = "flow-1";
+
+    const { result, rerender } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "update_node_input",
+        nodeId: "n1",
+        key: "query",
+        value: "test",
+      });
+    });
+    expect(result.current.appliedActionKeys.size).toBe(1);
+
+    // Navigate to a different graph
+    mockFlowID = "flow-2";
+    rerender();
+
+    expect(result.current.appliedActionKeys.size).toBe(0);
+  });
+
+  it("resets sessionId when flowID changes", async () => {
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-abc" },
+    });
+    mockFlowID = "flow-1";
+
+    const { result, rerender } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+    expect(result.current.sessionId).toBe("sess-abc");
+
+    // Navigate to a different graph
+    mockFlowID = "flow-2";
+    rerender();
+
+    expect(result.current.sessionId).toBeNull();
   });
 });

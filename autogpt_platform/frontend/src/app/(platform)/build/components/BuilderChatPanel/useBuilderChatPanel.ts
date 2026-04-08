@@ -12,6 +12,7 @@ import { useEdgeStore } from "../../stores/edgeStore";
 import { useNodeStore } from "../../stores/nodeStore";
 import {
   GraphAction,
+  SEED_PROMPT_PREFIX,
   buildSeedPrompt,
   extractTextFromParts,
   getActionKey,
@@ -26,7 +27,7 @@ interface UseBuilderChatPanelArgs {
 }
 
 export function useBuilderChatPanel({
-  isGraphLoaded = true,
+  isGraphLoaded = false,
 }: UseBuilderChatPanelArgs = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -38,6 +39,9 @@ export function useBuilderChatPanel({
   // Guards whether the seed message has been sent for this session.
   const hasSentSeedMessageRef = useRef(false);
   const sendMessageRef = useRef<SendMessageFn | null>(null);
+  // Ref-based guard so the session-creation effect doesn't re-run (and cancel
+  // the in-flight request) when setIsCreatingSession triggers a re-render.
+  const isCreatingSessionRef = useRef(false);
 
   const [{ flowID }] = useQueryStates({ flowID: parseAsString });
   const queryClient = useQueryClient();
@@ -57,10 +61,12 @@ export function useBuilderChatPanel({
   }, [flowID]);
 
   useEffect(() => {
-    if (!isOpen || sessionId || isCreatingSession || sessionError) return;
+    if (!isOpen || sessionId || isCreatingSessionRef.current || sessionError)
+      return;
     // The `cancelled` flag prevents state updates after the component unmounts
     // or the effect re-runs, avoiding stale state from async calls.
     let cancelled = false;
+    isCreatingSessionRef.current = true;
 
     async function createSession() {
       setIsCreatingSession(true);
@@ -78,15 +84,22 @@ export function useBuilderChatPanel({
       } catch {
         if (!cancelled) setSessionError(true);
       } finally {
-        if (!cancelled) setIsCreatingSession(false);
+        if (!cancelled) {
+          setIsCreatingSession(false);
+          isCreatingSessionRef.current = false;
+        }
       }
     }
 
     createSession();
     return () => {
       cancelled = true;
+      isCreatingSessionRef.current = false;
     };
-  }, [isOpen, sessionId, isCreatingSession, sessionError]);
+    // isCreatingSession is intentionally excluded: the ref guards re-entry so
+    // state-driven re-renders don't cancel the in-flight request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, sessionId, sessionError]);
 
   const transport = useMemo(
     () =>
@@ -126,11 +139,17 @@ export function useBuilderChatPanel({
   // without including it in the deps array (avoids re-triggering the effect).
   sendMessageRef.current = sendMessage;
 
-  // ID of the seed message sent on panel open. It contains prompt-engineering
-  // instructions that should not be shown to the user.
+  // ID of the seed message sent on panel open. Matched by content prefix rather
+  // than message position so user messages are never accidentally suppressed.
   const seedMessageId = useMemo(() => {
     if (!hasSentSeedMessageRef.current) return null;
-    return messages.find((m) => m.role === "user")?.id ?? null;
+    return (
+      messages.find(
+        (m) =>
+          m.role === "user" &&
+          extractTextFromParts(m.parts).startsWith(SEED_PROMPT_PREFIX),
+      )?.id ?? null
+    );
   }, [messages]);
 
   // Parsed actions from all assistant messages, accumulated across turns.
@@ -215,7 +234,9 @@ export function useBuilderChatPanel({
         type: "custom",
       });
     } else {
-      return;
+      // Exhaustiveness guard — TypeScript ensures all GraphAction types are handled above.
+      const _: never = action;
+      return _;
     }
     setAppliedActionKeys((prev) => new Set([...prev, getActionKey(action)]));
     if (flowID) {
