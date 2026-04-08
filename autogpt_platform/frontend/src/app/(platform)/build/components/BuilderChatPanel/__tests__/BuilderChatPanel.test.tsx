@@ -214,6 +214,14 @@ describe("BuilderChatPanel", () => {
     expect(screen.getByText(/Connection error/i)).toBeDefined();
   });
 
+  it("shows session error message when sessionError is true", () => {
+    mockUseBuilderChatPanel.mockReturnValue(
+      makeMockHook({ isOpen: true, sessionError: true }),
+    );
+    render(<BuilderChatPanel />);
+    expect(screen.getByText(/Failed to start chat session/i)).toBeDefined();
+  });
+
   it("renders the panel with role=dialog and message list with role=log", () => {
     mockUseBuilderChatPanel.mockReturnValue(makeMockHook({ isOpen: true }));
     render(<BuilderChatPanel />);
