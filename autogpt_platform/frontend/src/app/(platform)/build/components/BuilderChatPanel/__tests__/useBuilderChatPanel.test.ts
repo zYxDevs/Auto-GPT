@@ -12,6 +12,7 @@ const mockNodes: unknown[] = [];
 const mockEdges: unknown[] = [];
 const mockUpdateNodeData = vi.fn();
 const mockAddEdge = vi.fn();
+const mockRemoveEdge = vi.fn();
 
 vi.mock("../../../stores/nodeStore", () => ({
   useNodeStore: (selector: (s: unknown) => unknown) =>
@@ -26,6 +27,7 @@ vi.mock("../../../stores/edgeStore", () => ({
     selector({
       edges: mockEdges,
       addEdge: mockAddEdge,
+      removeEdge: mockRemoveEdge,
     }),
 }));
 
@@ -91,6 +93,7 @@ beforeEach(() => {
   mockEdges.length = 0;
   mockUpdateNodeData.mockClear();
   mockAddEdge.mockClear();
+  mockRemoveEdge.mockClear();
   mockPostV2CreateSession.mockClear();
   mockInvalidateQueries.mockClear();
   mockSendMessage.mockClear();
@@ -660,6 +663,33 @@ describe("useBuilderChatPanel – undo", () => {
     act(() => {
       result.current.handleUndoLastAction();
     });
+    expect(result.current.appliedActionKeys.size).toBe(0);
+  });
+
+  it("connect_nodes: removes edge via removeEdge after undo", () => {
+    mockNodes.push({ id: "src", data: {} }, { id: "tgt", data: {} });
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "connect_nodes",
+        source: "src",
+        target: "tgt",
+        sourceHandle: "out",
+        targetHandle: "in",
+      });
+    });
+
+    expect(mockAddEdge).toHaveBeenCalledOnce();
+    expect(result.current.undoStack).toHaveLength(1);
+
+    act(() => {
+      result.current.handleUndoLastAction();
+    });
+
+    expect(mockRemoveEdge).toHaveBeenCalledWith("src:out->tgt:in");
+    expect(result.current.undoStack).toHaveLength(0);
     expect(result.current.appliedActionKeys.size).toBe(0);
   });
 });

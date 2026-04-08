@@ -79,6 +79,7 @@ export function useBuilderChatPanel({
   const edges = useEdgeStore(useShallow((s) => s.edges));
   const updateNodeData = useNodeStore(useShallow((s) => s.updateNodeData));
   const addEdge = useEdgeStore(useShallow((s) => s.addEdge));
+  const removeEdge = useEdgeStore(useShallow((s) => s.removeEdge));
 
   // Reset session and seed-sent guard when the user navigates to a different
   // graph so the new graph's context is sent to the AI on next open.
@@ -330,8 +331,24 @@ export function useBuilderChatPanel({
         });
         return;
       }
+      const edgeId = `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
+      const key = getActionKey(action);
+      setUndoStack((prev) => [
+        ...prev,
+        {
+          actionKey: key,
+          restore: () => {
+            removeEdge(edgeId);
+            setAppliedActionKeys((keys) => {
+              const next = new Set(keys);
+              next.delete(key);
+              return next;
+            });
+          },
+        },
+      ]);
       addEdge({
-        id: `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`,
+        id: edgeId,
         source: action.source,
         target: action.target,
         sourceHandle: action.sourceHandle,

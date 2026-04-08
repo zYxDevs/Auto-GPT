@@ -8,7 +8,12 @@ const MAX_EDGES = 200;
 
 /** Escapes XML special characters in user-controlled strings before embedding in prompts. */
 function sanitizeForXml(s: string): string {
-  return s.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
 /**
