@@ -10,6 +10,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import type { CustomNode } from "../FlowEditor/nodes/CustomNode/CustomNode";
 import { GraphAction } from "./helpers";
 import { useBuilderChatPanel } from "./useBuilderChatPanel";
@@ -27,6 +28,7 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
     sendMessage,
     stop,
     status,
+    error,
     isCreatingSession,
     sessionError,
     sessionId,
@@ -53,9 +55,6 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
     if (!text || !canSend) return;
     setInputValue("");
     sendMessage({ text });
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 50);
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -73,13 +72,18 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
       )}
     >
       {isOpen && (
-        <div className="pointer-events-auto flex h-[70vh] w-96 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+        <div
+          role="dialog"
+          aria-label="Builder chat panel"
+          className="pointer-events-auto flex h-[70vh] w-96 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
+        >
           <PanelHeader onClose={handleToggle} />
 
           <MessageList
             messages={messages}
             isCreatingSession={isCreatingSession}
             sessionError={sessionError}
+            streamError={error}
             nodes={nodes}
             parsedActions={parsedActions}
             onApplyAction={handleApplyAction}
@@ -134,6 +138,7 @@ interface MessageListProps {
   messages: ReturnType<typeof useBuilderChatPanel>["messages"];
   isCreatingSession: boolean;
   sessionError: boolean;
+  streamError: Error | undefined;
   nodes: CustomNode[];
   parsedActions: GraphAction[];
   onApplyAction: (action: GraphAction) => void;
@@ -144,13 +149,29 @@ function MessageList({
   messages,
   isCreatingSession,
   sessionError,
+  streamError,
   nodes,
   parsedActions,
   onApplyAction,
   messagesEndRef,
 }: MessageListProps) {
+  const visibleMessages = messages.filter((msg) => {
+    const text = msg.parts
+      .filter(
+        (p): p is Extract<typeof p, { type: "text" }> => p.type === "text",
+      )
+      .map((p) => p.text)
+      .join("");
+    return Boolean(text);
+  });
+
   return (
-    <div className="flex-1 space-y-3 overflow-y-auto p-4">
+    <div
+      role="log"
+      aria-live="polite"
+      aria-label="Chat messages"
+      className="flex-1 space-y-3 overflow-y-auto p-4"
+    >
       {isCreatingSession && (
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <SpinnerGap size={14} className="animate-spin" />
@@ -164,15 +185,30 @@ function MessageList({
         </div>
       )}
 
-      {messages.map((msg) => {
+      {streamError && (
+        <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-600">
+          Connection error. Please try sending your message again.
+        </div>
+      )}
+
+      {visibleMessages.length === 0 && !isCreatingSession && !sessionError && (
+        <div className="flex flex-col items-center gap-2 py-6 text-center text-xs text-slate-400">
+          <ChatCircle size={28} weight="duotone" className="text-violet-300" />
+          <p>Ask me to explain or modify your agent.</p>
+          <p className="text-slate-300">
+            You can say things like &ldquo;What does this agent do?&rdquo; or
+            &ldquo;Add a step that formats the output.&rdquo;
+          </p>
+        </div>
+      )}
+
+      {visibleMessages.map((msg) => {
         const textParts = msg.parts
           .filter(
             (p): p is Extract<typeof p, { type: "text" }> => p.type === "text",
           )
           .map((p) => p.text)
           .join("");
-
-        if (!textParts) return null;
 
         return (
           <div
@@ -184,7 +220,29 @@ function MessageList({
                 : "bg-slate-100 text-slate-800",
             )}
           >
-            {textParts}
+            {msg.role === "assistant" ? (
+              <ReactMarkdown
+                components={{
+                  p: ({ children }) => (
+                    <p className="mb-1 last:mb-0">{children}</p>
+                  ),
+                  code: ({ children }) => (
+                    <code className="rounded bg-slate-200 px-1 py-0.5 font-mono text-xs">
+                      {children}
+                    </code>
+                  ),
+                  pre: ({ children }) => (
+                    <pre className="my-1 overflow-x-auto rounded bg-slate-200 p-2 font-mono text-xs">
+                      {children}
+                    </pre>
+                  ),
+                }}
+              >
+                {textParts}
+              </ReactMarkdown>
+            ) : (
+              textParts
+            )}
           </div>
         );
       })}
@@ -225,18 +283,10 @@ function ActionItem({
   nodes: CustomNode[];
   onApply: () => void;
 }) {
-  // The AI applies changes server-side via edit_agent; the canvas refreshes
-  // automatically via invalidateQueries. The button starts in the applied state
-  // to reflect that changes are already live — not pending user confirmation.
-  const [applied, setApplied] = useState(true);
-
-  function handleApply() {
-    onApply();
-    setApplied(true);
-  }
-
   const nodeName = (id: string) =>
-    nodes.find((n) => n.id === id)?.data.title ?? id;
+    nodes.find((n) => n.id === id)?.data.metadata?.customized_name ||
+    nodes.find((n) => n.id === id)?.data.title ||
+    id;
 
   const label =
     action.type === "update_node_input"
@@ -247,16 +297,11 @@ function ActionItem({
     <div className="flex items-start justify-between gap-2 rounded bg-white p-2 text-xs shadow-sm">
       <span className="leading-tight text-slate-700">{label}</span>
       <button
-        onClick={handleApply}
-        disabled={applied}
-        className={cn(
-          "shrink-0 rounded px-2 py-0.5 text-xs font-medium transition-colors",
-          applied
-            ? "bg-green-100 text-green-700"
-            : "bg-violet-600 text-white hover:bg-violet-700",
-        )}
+        onClick={onApply}
+        className="shrink-0 rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
+        aria-label="Applied"
       >
-        {applied ? "Applied" : "Apply"}
+        Applied
       </button>
     </div>
   );
@@ -289,7 +334,7 @@ function PanelInput({
           disabled={isDisabled}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Ask about your agent…"
+          placeholder="Ask about your agent… (Enter to send, Shift+Enter for newline)"
           rows={2}
           className="flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-200 disabled:opacity-50"
         />

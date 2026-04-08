@@ -12,6 +12,8 @@ import { useEdgeStore } from "../../stores/edgeStore";
 import { useNodeStore } from "../../stores/nodeStore";
 import {
   GraphAction,
+  buildSeedPrompt,
+  getMessageText,
   parseGraphActions,
   serializeGraphForChat,
 } from "./helpers";
@@ -29,7 +31,8 @@ export function useBuilderChatPanel({
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [sessionError, setSessionError] = useState(false);
-  const initializedRef = useRef(false);
+  // Guards whether the seed message has been sent for this session.
+  const hasSentSeedMessageRef = useRef(false);
   const sendMessageRef = useRef<SendMessageFn | null>(null);
   const prevStatusRef = useRef<string>("ready");
 
@@ -41,34 +44,44 @@ export function useBuilderChatPanel({
   const updateNodeData = useNodeStore(useShallow((s) => s.updateNodeData));
   const addEdge = useEdgeStore(useShallow((s) => s.addEdge));
 
-  // Reset session and initialized state when the user navigates to a different
+  // Reset session and seed-sent guard when the user navigates to a different
   // graph so the new graph's context is sent to the AI on next open.
   useEffect(() => {
     setSessionId(null);
     setSessionError(false);
-    initializedRef.current = false;
+    hasSentSeedMessageRef.current = false;
   }, [flowID]);
 
   useEffect(() => {
     if (!isOpen || sessionId || isCreatingSession || sessionError) return;
+    // The `ignore` flag prevents state updates after the component unmounts or
+    // the effect re-runs, avoiding React "update on unmounted component" warnings.
+    let ignore = false;
 
     async function createSession() {
       setIsCreatingSession(true);
       try {
+        // NOTE: The backend validates that the authenticated user owns the
+        // session before allowing any messages — session IDs alone are not
+        // sufficient for unauthorized access.
         const res = await postV2CreateSession(null);
+        if (ignore) return;
         if (res.status === 200) {
           setSessionId(res.data.id);
         } else {
           setSessionError(true);
         }
       } catch {
-        setSessionError(true);
+        if (!ignore) setSessionError(true);
       } finally {
-        setIsCreatingSession(false);
+        if (!ignore) setIsCreatingSession(false);
       }
     }
 
     createSession();
+    return () => {
+      ignore = true;
+    };
   }, [isOpen, sessionId, isCreatingSession, sessionError]);
 
   const transport = useMemo(
@@ -83,10 +96,7 @@ export function useBuilderChatPanel({
                 throw new Error(
                   "Authentication failed — please sign in again.",
                 );
-              const messageText =
-                last.parts
-                  ?.map((p) => (p.type === "text" ? p.text : ""))
-                  .join("") ?? "";
+              const messageText = getMessageText(last.parts ?? []);
               return {
                 body: {
                   message: messageText,
@@ -103,27 +113,24 @@ export function useBuilderChatPanel({
     [sessionId],
   );
 
-  const { messages, sendMessage, stop, status } = useChat({
+  const { messages, sendMessage, stop, status, error } = useChat({
     id: sessionId ?? undefined,
     transport: transport ?? undefined,
   });
 
   // Keep a stable ref so the initialization effect can call sendMessage
-  // without including it in the deps array (avoids re-triggering the effect)
+  // without including it in the deps array (avoids re-triggering the effect).
   sendMessageRef.current = sendMessage;
 
-  // Parsed actions from the last assistant message. Placed before the
-  // invalidation effect so the effect can check whether a turn mutated the graph.
+  // Parsed actions from the last assistant message. Gated on `status ===
+  // "ready"` so the expensive regex parse only runs once per completed AI turn,
+  // not on every streaming chunk.
   const parsedActions = useMemo(() => {
+    if (status !== "ready") return [];
     const assistantMessages = messages.filter((m) => m.role === "assistant");
     const last = assistantMessages[assistantMessages.length - 1];
     if (!last) return [];
-    const text = last.parts
-      .filter(
-        (p): p is Extract<typeof p, { type: "text" }> => p.type === "text",
-      )
-      .map((p) => p.text)
-      .join("");
+    const text = getMessageText(last.parts ?? []);
     const parsed = parseGraphActions(text);
     const seen = new Set<string>();
     return parsed.filter((action) => {
@@ -135,7 +142,7 @@ export function useBuilderChatPanel({
       seen.add(key);
       return true;
     });
-  }, [messages]);
+  }, [messages, status]);
 
   // Refresh the canvas only when the AI turn actually mutated the graph via
   // edit_agent. Gating on parsedActions.length > 0 avoids an unnecessary
@@ -155,25 +162,21 @@ export function useBuilderChatPanel({
     }
   }, [status, flowID, queryClient, parsedActions.length]);
 
+  // Send the seed message once per session. `nodes` and `edges` are included in
+  // the dep array so this effect always has fresh data; the hasSentSeedMessageRef
+  // guard ensures it only fires once even when the store updates.
   useEffect(() => {
-    if (!sessionId || !transport || !isGraphLoaded || initializedRef.current)
+    if (
+      !sessionId ||
+      !transport ||
+      !isGraphLoaded ||
+      hasSentSeedMessageRef.current
+    )
       return;
-    initializedRef.current = true;
+    hasSentSeedMessageRef.current = true;
     const summary = serializeGraphForChat(nodes, edges);
-    sendMessageRef.current?.({
-      text:
-        `I'm building an agent in the AutoGPT flow builder. Here's the current graph:\n\n${summary}\n\n` +
-        `IMPORTANT: When you modify the graph using edit_agent or fix_agent_graph, you MUST output one JSON ` +
-        `code block per change using EXACTLY these formats — no other structure is recognized:\n\n` +
-        `To update a node input field:\n` +
-        `\`\`\`json\n{"action": "update_node_input", "node_id": "<exact node id>", "key": "<input field name>", "value": <new value>}\n\`\`\`\n\n` +
-        `To add a connection between nodes:\n` +
-        `\`\`\`json\n{"action": "connect_nodes", "source": "<source node id>", "target": "<target node id>", "source_handle": "<output handle name>", "target_handle": "<input handle name>"}\n\`\`\`\n\n` +
-        `Rules: the "action" key is required and must be exactly "update_node_input" or "connect_nodes". ` +
-        `Do not use any other field names (e.g. "block", "change", "field", "from", "to" are NOT valid).\n\n` +
-        `What does this agent do?`,
-    });
-  }, [sessionId, transport, isGraphLoaded]);
+    sendMessageRef.current?.({ text: buildSeedPrompt(summary) });
+  }, [sessionId, transport, isGraphLoaded, nodes, edges]);
 
   function handleToggle() {
     // Reset session error when reopening so the panel can retry session creation
@@ -194,6 +197,10 @@ export function useBuilderChatPanel({
         },
       });
     } else if (action.type === "connect_nodes") {
+      // Validate both nodes exist before adding the edge to prevent dangling edges
+      const sourceNode = nodes.find((n) => n.id === action.source);
+      const targetNode = nodes.find((n) => n.id === action.target);
+      if (!sourceNode || !targetNode) return;
       addEdge({
         id: `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`,
         source: action.source,
@@ -212,6 +219,7 @@ export function useBuilderChatPanel({
     sendMessage,
     stop,
     status,
+    error,
     isCreatingSession,
     sessionError,
     sessionId,
