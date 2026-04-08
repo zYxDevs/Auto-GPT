@@ -188,6 +188,10 @@ export function useBuilderChatPanel({
     if (action.type === "update_node_input") {
       const node = nodes.find((n) => n.id === action.nodeId);
       if (!node) return;
+      // Reject keys not present in the node's input schema to prevent writing
+      // arbitrary fields that the block does not support.
+      const schemaProps = node.data.inputSchema?.properties;
+      if (schemaProps && !(action.key in schemaProps)) return;
       updateNodeData(action.nodeId, {
         hardcodedValues: {
           ...node.data.hardcodedValues,
@@ -195,10 +199,14 @@ export function useBuilderChatPanel({
         },
       });
     } else if (action.type === "connect_nodes") {
-      // Validate both nodes exist before adding the edge to prevent dangling edges
-      const sourceExists = nodes.some((n) => n.id === action.source);
-      const targetExists = nodes.some((n) => n.id === action.target);
-      if (!sourceExists || !targetExists) return;
+      const sourceNode = nodes.find((n) => n.id === action.source);
+      const targetNode = nodes.find((n) => n.id === action.target);
+      if (!sourceNode || !targetNode) return;
+      // Validate that the referenced handles exist on the respective nodes.
+      const srcProps = sourceNode.data.outputSchema?.properties;
+      const tgtProps = targetNode.data.inputSchema?.properties;
+      if (srcProps && !(action.sourceHandle in srcProps)) return;
+      if (tgtProps && !(action.targetHandle in tgtProps)) return;
       addEdge({
         id: `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`,
         source: action.source,

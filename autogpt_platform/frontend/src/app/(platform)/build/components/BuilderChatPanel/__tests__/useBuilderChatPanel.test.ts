@@ -127,7 +127,7 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
   });
 
   it("connect_nodes: calls addEdge when both nodes exist", () => {
-    mockNodes.push({ id: "src" }, { id: "tgt" });
+    mockNodes.push({ id: "src", data: {} }, { id: "tgt", data: {} });
     const { result } = renderHook(() => useBuilderChatPanel());
 
     act(() => {
@@ -151,7 +151,7 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
   });
 
   it("connect_nodes: does NOT call addEdge when source node is missing", () => {
-    mockNodes.push({ id: "tgt" });
+    mockNodes.push({ id: "tgt", data: {} });
     const { result } = renderHook(() => useBuilderChatPanel());
 
     act(() => {
@@ -168,7 +168,7 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
   });
 
   it("connect_nodes: does NOT call addEdge when target node is missing", () => {
-    mockNodes.push({ id: "src" });
+    mockNodes.push({ id: "src", data: {} });
     const { result } = renderHook(() => useBuilderChatPanel());
 
     act(() => {
@@ -182,6 +182,137 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
     });
 
     expect(mockAddEdge).not.toHaveBeenCalled();
+  });
+
+  it("update_node_input: rejects key not present in inputSchema when schema is defined", () => {
+    mockNodes.push({
+      id: "node-1",
+      data: {
+        hardcodedValues: {},
+        inputSchema: { properties: { allowed_key: {} } },
+      },
+    });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "update_node_input",
+        nodeId: "node-1",
+        key: "forbidden_key",
+        value: "test",
+      });
+    });
+
+    expect(mockUpdateNodeData).not.toHaveBeenCalled();
+  });
+
+  it("update_node_input: allows key present in inputSchema", () => {
+    mockNodes.push({
+      id: "node-1",
+      data: {
+        hardcodedValues: {},
+        inputSchema: { properties: { query: {} } },
+      },
+    });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "update_node_input",
+        nodeId: "node-1",
+        key: "query",
+        value: "AI news",
+      });
+    });
+
+    expect(mockUpdateNodeData).toHaveBeenCalledWith("node-1", {
+      hardcodedValues: { query: "AI news" },
+    });
+  });
+
+  it("connect_nodes: rejects sourceHandle not in outputSchema when schema is defined", () => {
+    mockNodes.push(
+      {
+        id: "src",
+        data: { outputSchema: { properties: { result: {} } } },
+      },
+      {
+        id: "tgt",
+        data: { inputSchema: { properties: { input: {} } } },
+      },
+    );
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "connect_nodes",
+        source: "src",
+        target: "tgt",
+        sourceHandle: "nonexistent_output",
+        targetHandle: "input",
+      });
+    });
+
+    expect(mockAddEdge).not.toHaveBeenCalled();
+  });
+
+  it("connect_nodes: rejects targetHandle not in inputSchema when schema is defined", () => {
+    mockNodes.push(
+      {
+        id: "src",
+        data: { outputSchema: { properties: { result: {} } } },
+      },
+      {
+        id: "tgt",
+        data: { inputSchema: { properties: { input: {} } } },
+      },
+    );
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "connect_nodes",
+        source: "src",
+        target: "tgt",
+        sourceHandle: "result",
+        targetHandle: "nonexistent_input",
+      });
+    });
+
+    expect(mockAddEdge).not.toHaveBeenCalled();
+  });
+
+  it("connect_nodes: calls addEdge when both handles are valid according to schemas", () => {
+    mockNodes.push(
+      {
+        id: "src",
+        data: { outputSchema: { properties: { result: {} } } },
+      },
+      {
+        id: "tgt",
+        data: { inputSchema: { properties: { input: {} } } },
+      },
+    );
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "connect_nodes",
+        source: "src",
+        target: "tgt",
+        sourceHandle: "result",
+        targetHandle: "input",
+      });
+    });
+
+    expect(mockAddEdge).toHaveBeenCalledWith({
+      id: "src:result->tgt:input",
+      source: "src",
+      target: "tgt",
+      sourceHandle: "result",
+      targetHandle: "input",
+      type: "custom",
+    });
   });
 });
 
