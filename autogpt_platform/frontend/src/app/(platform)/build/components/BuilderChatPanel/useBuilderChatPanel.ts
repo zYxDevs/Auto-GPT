@@ -127,6 +127,13 @@ export function useBuilderChatPanel({
   sendMessageRef.current = sendMessage;
   handleApplyActionRef.current = handleApplyAction;
 
+  // ID of the seed message sent on panel open. It contains prompt-engineering
+  // instructions that should not be shown to the user.
+  const seedMessageId = useMemo(() => {
+    if (!hasSentSeedMessageRef.current) return null;
+    return messages.find((m) => m.role === "user")?.id ?? null;
+  }, [messages]);
+
   // Parsed actions from the last assistant message. Gated on `status ===
   // "ready"` so the expensive regex parse only runs once per completed AI turn,
   // not on every streaming chunk.
@@ -238,5 +245,6 @@ export function useBuilderChatPanel({
     nodes,
     parsedActions,
     handleApplyAction,
+    seedMessageId,
   };
 }

@@ -40,6 +40,7 @@ function makeMockHook(
     nodes: [],
     parsedActions: [],
     handleApplyAction: vi.fn(),
+    seedMessageId: null,
     ...overrides,
   };
 }

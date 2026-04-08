@@ -34,6 +34,7 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
     sessionId,
     nodes,
     parsedActions,
+    seedMessageId,
   } = useBuilderChatPanel({ isGraphLoaded });
 
   const [inputValue, setInputValue] = useState("");
@@ -90,6 +91,7 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
             streamError={error}
             nodes={nodes}
             parsedActions={parsedActions}
+            seedMessageId={seedMessageId}
             messagesEndRef={messagesEndRef}
           />
 
@@ -145,6 +147,7 @@ interface MessageListProps {
   streamError: Error | undefined;
   nodes: CustomNode[];
   parsedActions: GraphAction[];
+  seedMessageId: string | null;
   messagesEndRef: React.RefObject<HTMLDivElement>;
 }
 
@@ -155,10 +158,12 @@ function MessageList({
   streamError,
   nodes,
   parsedActions,
+  seedMessageId,
   messagesEndRef,
 }: MessageListProps) {
-  const visibleMessages = messages.filter((msg) =>
-    Boolean(extractTextFromParts(msg.parts)),
+  const visibleMessages = messages.filter(
+    (msg) =>
+      msg.id !== seedMessageId && Boolean(extractTextFromParts(msg.parts)),
   );
 
   return (
