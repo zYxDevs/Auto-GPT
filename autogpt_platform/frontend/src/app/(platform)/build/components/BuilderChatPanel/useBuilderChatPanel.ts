@@ -65,8 +65,9 @@ export function useBuilderChatPanel({
   const nodes = useNodeStore(useShallow((s) => s.nodes));
   const edges = useEdgeStore(useShallow((s) => s.edges));
   const updateNodeData = useNodeStore(useShallow((s) => s.updateNodeData));
+  const setNodes = useNodeStore(useShallow((s) => s.setNodes));
   const addEdge = useEdgeStore(useShallow((s) => s.addEdge));
-  const removeEdge = useEdgeStore(useShallow((s) => s.removeEdge));
+  const setEdges = useEdgeStore(useShallow((s) => s.setEdges));
 
   // Reset session and seed-sent guard when the user navigates to a different
   // graph so the new graph's context is sent to the AI on next open.
@@ -266,19 +267,18 @@ export function useBuilderChatPanel({
         });
         return;
       }
-      // Deep-clone before mutating so sequential applies to the same node
-      // each capture an independent snapshot — without this, the reference
-      // would point to the same object after mutation.
-      const prevHardcoded = structuredClone(node.data.hardcodedValues);
+      // Capture a full nodes snapshot before mutating. The restore function
+      // uses setNodes (not updateNodeData) to bypass the history store —
+      // otherwise the global Ctrl+Z undo would conflict with the chat panel's
+      // own undo stack by re-applying the just-undone change.
+      const prevNodes = useNodeStore.getState().nodes;
       const key = getActionKey(action);
       setUndoStack((prev) => [
         ...prev,
         {
           actionKey: key,
           restore: () => {
-            updateNodeData(action.nodeId, {
-              hardcodedValues: prevHardcoded,
-            });
+            setNodes(prevNodes);
             setAppliedActionKeys((keys) => {
               const next = new Set(keys);
               next.delete(key);
@@ -324,13 +324,17 @@ export function useBuilderChatPanel({
         return;
       }
       const edgeId = `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
+      // Capture a full edges snapshot before mutating. The restore function
+      // uses setEdges (not removeEdge) to bypass the history store —
+      // otherwise the global Ctrl+Z undo would re-add the just-removed edge.
+      const prevEdges = useEdgeStore.getState().edges;
       const key = getActionKey(action);
       setUndoStack((prev) => [
         ...prev,
         {
           actionKey: key,
           restore: () => {
-            removeEdge(edgeId);
+            setEdges(prevEdges);
             setAppliedActionKeys((keys) => {
               const next = new Set(keys);
               next.delete(key);

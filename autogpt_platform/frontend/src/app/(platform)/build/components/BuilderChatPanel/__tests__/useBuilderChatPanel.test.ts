@@ -11,25 +11,42 @@ vi.mock("zustand/react/shallow", () => ({
 const mockNodes: unknown[] = [];
 const mockEdges: unknown[] = [];
 const mockUpdateNodeData = vi.fn();
+const mockSetNodes = vi.fn();
 const mockAddEdge = vi.fn();
+const mockSetEdges = vi.fn();
 const mockRemoveEdge = vi.fn();
 
-vi.mock("../../../stores/nodeStore", () => ({
-  useNodeStore: (selector: (s: unknown) => unknown) =>
+vi.mock("../../../stores/nodeStore", () => {
+  const useNodeStore = (selector: (s: unknown) => unknown) =>
     selector({
       nodes: mockNodes,
       updateNodeData: mockUpdateNodeData,
-    }),
-}));
+      setNodes: mockSetNodes,
+    });
+  useNodeStore.getState = () => ({
+    nodes: mockNodes,
+    updateNodeData: mockUpdateNodeData,
+    setNodes: mockSetNodes,
+  });
+  return { useNodeStore };
+});
 
-vi.mock("../../../stores/edgeStore", () => ({
-  useEdgeStore: (selector: (s: unknown) => unknown) =>
+vi.mock("../../../stores/edgeStore", () => {
+  const useEdgeStore = (selector: (s: unknown) => unknown) =>
     selector({
       edges: mockEdges,
       addEdge: mockAddEdge,
+      setEdges: mockSetEdges,
       removeEdge: mockRemoveEdge,
-    }),
-}));
+    });
+  useEdgeStore.getState = () => ({
+    edges: mockEdges,
+    addEdge: mockAddEdge,
+    setEdges: mockSetEdges,
+    removeEdge: mockRemoveEdge,
+  });
+  return { useEdgeStore };
+});
 
 const mockPostV2CreateSession = vi.fn();
 vi.mock("@/app/api/__generated__/endpoints/chat/chat", () => ({
@@ -96,7 +113,9 @@ beforeEach(() => {
   mockChatMessages = [];
   mockChatStatus = "ready";
   mockUpdateNodeData.mockClear();
+  mockSetNodes.mockClear();
   mockAddEdge.mockClear();
+  mockSetEdges.mockClear();
   mockRemoveEdge.mockClear();
   mockPostV2CreateSession.mockClear();
   mockInvalidateQueries.mockClear();
@@ -579,12 +598,12 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
 });
 
 describe("useBuilderChatPanel – undo", () => {
-  it("restores previous hardcodedValues after undo", () => {
-    const prevValues = { existing: "original" };
-    mockNodes.push({
+  it("restores previous node state after undo using setNodes (bypasses history store)", () => {
+    const initialNode = {
       id: "node-undo",
-      data: { hardcodedValues: prevValues },
-    });
+      data: { hardcodedValues: { existing: "original" } },
+    };
+    mockNodes.push(initialNode);
 
     const { result } = renderHook(() => useBuilderChatPanel());
 
@@ -599,13 +618,18 @@ describe("useBuilderChatPanel – undo", () => {
 
     expect(result.current.undoStack).toHaveLength(1);
 
+    // Clear call history so we can verify undo only uses setNodes (not updateNodeData)
+    mockUpdateNodeData.mockClear();
+    mockSetNodes.mockClear();
+
     act(() => {
       result.current.handleUndoLastAction();
     });
 
-    expect(mockUpdateNodeData).toHaveBeenLastCalledWith("node-undo", {
-      hardcodedValues: prevValues,
-    });
+    // setNodes is called with the captured snapshot to bypass the global history store
+    expect(mockSetNodes).toHaveBeenCalledWith([initialNode]);
+    // updateNodeData must NOT be called during undo to avoid pushing to history store
+    expect(mockUpdateNodeData).not.toHaveBeenCalled();
     expect(result.current.undoStack).toHaveLength(0);
   });
 
@@ -632,7 +656,9 @@ describe("useBuilderChatPanel – undo", () => {
     expect(result.current.appliedActionKeys.size).toBe(0);
   });
 
-  it("connect_nodes: removes edge via removeEdge after undo", () => {
+  it("connect_nodes: restores edges via setEdges after undo (bypasses history store)", () => {
+    const initialEdge = { id: "existing-edge", source: "a", target: "b" };
+    mockEdges.push(initialEdge);
     mockNodes.push({ id: "src", data: {} }, { id: "tgt", data: {} });
 
     const { result } = renderHook(() => useBuilderChatPanel());
@@ -654,7 +680,9 @@ describe("useBuilderChatPanel – undo", () => {
       result.current.handleUndoLastAction();
     });
 
-    expect(mockRemoveEdge).toHaveBeenCalledWith("src:out->tgt:in");
+    // setEdges is called with the captured snapshot to bypass the global history store
+    expect(mockSetEdges).toHaveBeenCalledWith([initialEdge]);
+    expect(mockRemoveEdge).not.toHaveBeenCalled();
     expect(result.current.undoStack).toHaveLength(0);
     expect(result.current.appliedActionKeys.size).toBe(0);
   });
