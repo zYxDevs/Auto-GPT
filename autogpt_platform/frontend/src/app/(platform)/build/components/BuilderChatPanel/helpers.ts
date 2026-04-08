@@ -3,6 +3,13 @@ import type { CustomEdge } from "../FlowEditor/edges/CustomEdge";
 
 /** Maximum nodes serialized into the AI context to prevent token overruns. */
 const MAX_NODES = 100;
+/** Maximum edges serialized into the AI context to prevent token overruns. */
+const MAX_EDGES = 200;
+
+/** Escapes XML special characters in user-controlled strings before embedding in prompts. */
+function sanitizeForXml(s: string): string {
+  return s.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 /**
  * Action emitted by the AI to edit the agent graph.
@@ -45,8 +52,14 @@ export function serializeGraphForChat(
 
   const visibleNodes = nodes.slice(0, MAX_NODES);
   const nodeLines = visibleNodes.map((n) => {
-    const name = n.data.metadata?.customized_name || n.data.title;
-    const desc = n.data.description ? ` — ${n.data.description}` : "";
+    const name = sanitizeForXml(
+      (n.data.metadata?.customized_name as string | undefined) ||
+        n.data.title ||
+        "",
+    );
+    const desc = n.data.description
+      ? ` — ${sanitizeForXml(n.data.description)}`
+      : "";
     return `- Node ${n.id}: "${name}"${desc}`;
   });
 
@@ -55,21 +68,35 @@ export function serializeGraphForChat(
       ? `\n(${nodes.length - MAX_NODES} additional nodes not shown)`
       : "";
 
-  const edgeLines = edges.map((e) => {
+  const visibleEdges = edges.slice(0, MAX_EDGES);
+  const edgeLines = visibleEdges.map((e) => {
     const src = nodes.find((n) => n.id === e.source);
     const tgt = nodes.find((n) => n.id === e.target);
-    const srcName =
-      src?.data.metadata?.customized_name || src?.data.title || e.source;
-    const tgtName =
-      tgt?.data.metadata?.customized_name || tgt?.data.title || e.target;
+    const srcName = sanitizeForXml(
+      (src?.data.metadata?.customized_name as string | undefined) ||
+        src?.data.title ||
+        e.source,
+    );
+    const tgtName = sanitizeForXml(
+      (tgt?.data.metadata?.customized_name as string | undefined) ||
+        tgt?.data.title ||
+        e.target,
+    );
     return `- "${srcName}" (${e.sourceHandle}) → "${tgtName}" (${e.targetHandle})`;
   });
+
+  const edgeTruncationNote =
+    edges.length > MAX_EDGES
+      ? `\n(${edges.length - MAX_EDGES} additional connections not shown)`
+      : "";
 
   const parts = [
     `Blocks (${nodes.length}):\n${nodeLines.join("\n")}${truncationNote}`,
   ];
   if (edgeLines.length > 0) {
-    parts.push(`Connections (${edges.length}):\n${edgeLines.join("\n")}`);
+    parts.push(
+      `Connections (${edges.length}):\n${edgeLines.join("\n")}${edgeTruncationNote}`,
+    );
   }
   return parts.join("\n\n");
 }

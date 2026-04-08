@@ -34,6 +34,8 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
     sessionId,
     nodes,
     parsedActions,
+    appliedActionKeys,
+    handleApplyAction,
     seedMessageId,
   } = useBuilderChatPanel({ isGraphLoaded });
 
@@ -91,6 +93,8 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
             streamError={error}
             nodes={nodes}
             parsedActions={parsedActions}
+            appliedActionKeys={appliedActionKeys}
+            onApplyAction={handleApplyAction}
             seedMessageId={seedMessageId}
             messagesEndRef={messagesEndRef}
           />
@@ -147,6 +151,8 @@ interface MessageListProps {
   streamError: Error | undefined;
   nodes: CustomNode[];
   parsedActions: GraphAction[];
+  appliedActionKeys: Set<string>;
+  onApplyAction: (action: GraphAction) => void;
   seedMessageId: string | null;
   messagesEndRef: React.RefObject<HTMLDivElement>;
 }
@@ -158,6 +164,8 @@ function MessageList({
   streamError,
   nodes,
   parsedActions,
+  appliedActionKeys,
+  onApplyAction,
   seedMessageId,
   messagesEndRef,
 }: MessageListProps) {
@@ -246,14 +254,17 @@ function MessageList({
       {parsedActions.length > 0 && (
         <div className="space-y-2 rounded-lg border border-violet-100 bg-violet-50 p-3">
           <p className="text-xs font-medium text-violet-700">
-            AI applied these changes
+            Suggested changes
           </p>
           {parsedActions.map((action) => {
+            const key = getActionKey(action);
             return (
               <ActionItem
-                key={getActionKey(action)}
+                key={key}
                 action={action}
                 nodes={nodes}
+                isApplied={appliedActionKeys.has(key)}
+                onApply={onApplyAction}
               />
             );
           })}
@@ -268,9 +279,13 @@ function MessageList({
 function ActionItem({
   action,
   nodes,
+  isApplied,
+  onApply,
 }: {
   action: GraphAction;
   nodes: CustomNode[];
+  isApplied: boolean;
+  onApply: (action: GraphAction) => void;
 }) {
   const nodeName = (id: string) =>
     nodes.find((n) => n.id === id)?.data.metadata?.customized_name ||
@@ -285,9 +300,18 @@ function ActionItem({
   return (
     <div className="flex items-start justify-between gap-2 rounded bg-white p-2 text-xs shadow-sm">
       <span className="leading-tight text-slate-700">{label}</span>
-      <span className="shrink-0 rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-        Applied
-      </span>
+      {isApplied ? (
+        <span className="shrink-0 rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+          Applied
+        </span>
+      ) : (
+        <button
+          onClick={() => onApply(action)}
+          className="shrink-0 rounded bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 hover:bg-violet-200"
+        >
+          Apply
+        </button>
+      )}
     </div>
   );
 }

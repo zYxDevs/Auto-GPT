@@ -39,6 +39,7 @@ function makeMockHook(
     sessionId: null,
     nodes: [],
     parsedActions: [],
+    appliedActionKeys: new Set<string>(),
     handleApplyAction: vi.fn(),
     seedMessageId: null,
     ...overrides,
@@ -119,7 +120,7 @@ describe("BuilderChatPanel", () => {
     expect(screen.getByText("This agent searches the web.")).toBeDefined();
   });
 
-  it("renders applied actions section when parsedActions are present", () => {
+  it("renders suggested changes section when parsedActions are present", () => {
     mockUseBuilderChatPanel.mockReturnValue(
       makeMockHook({
         isOpen: true,
@@ -134,11 +135,11 @@ describe("BuilderChatPanel", () => {
       }),
     );
     render(<BuilderChatPanel />);
-    expect(screen.getByText("AI applied these changes")).toBeDefined();
-    expect(screen.getByText("Applied")).toBeDefined();
+    expect(screen.getByText("Suggested changes")).toBeDefined();
+    expect(screen.getByText("Apply")).toBeDefined();
   });
 
-  it("shows applied badge for actions", () => {
+  it("shows Apply button for unapplied actions and Applied badge for applied actions", () => {
     const action = {
       type: "update_node_input" as const,
       nodeId: "1",
@@ -149,10 +150,32 @@ describe("BuilderChatPanel", () => {
       makeMockHook({
         isOpen: true,
         parsedActions: [action],
+        appliedActionKeys: new Set(["1:query"]),
       }),
     );
     render(<BuilderChatPanel />);
     expect(screen.getByText("Applied")).toBeDefined();
+    expect(screen.queryByText("Apply")).toBeNull();
+  });
+
+  it("calls handleApplyAction when Apply button is clicked", () => {
+    const handleApplyAction = vi.fn();
+    const action = {
+      type: "update_node_input" as const,
+      nodeId: "1",
+      key: "query",
+      value: "AI news",
+    };
+    mockUseBuilderChatPanel.mockReturnValue(
+      makeMockHook({
+        isOpen: true,
+        parsedActions: [action],
+        handleApplyAction,
+      }),
+    );
+    render(<BuilderChatPanel />);
+    fireEvent.click(screen.getByText("Apply"));
+    expect(handleApplyAction).toHaveBeenCalledWith(action);
   });
 
   it("calls sendMessage when the user submits a message", () => {

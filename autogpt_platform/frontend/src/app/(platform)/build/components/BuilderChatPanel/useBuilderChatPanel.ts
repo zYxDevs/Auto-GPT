@@ -32,13 +32,12 @@ export function useBuilderChatPanel({
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [sessionError, setSessionError] = useState(false);
+  const [appliedActionKeys, setAppliedActionKeys] = useState<Set<string>>(
+    new Set(),
+  );
   // Guards whether the seed message has been sent for this session.
   const hasSentSeedMessageRef = useRef(false);
   const sendMessageRef = useRef<SendMessageFn | null>(null);
-  const handleApplyActionRef = useRef<((action: GraphAction) => void) | null>(
-    null,
-  );
-  const prevStatusRef = useRef<string>("ready");
 
   const [{ flowID }] = useQueryStates({ flowID: parseAsString });
   const queryClient = useQueryClient();
@@ -53,6 +52,7 @@ export function useBuilderChatPanel({
   useEffect(() => {
     setSessionId(null);
     setSessionError(false);
+    setAppliedActionKeys(new Set());
     hasSentSeedMessageRef.current = false;
   }, [flowID]);
 
@@ -125,7 +125,6 @@ export function useBuilderChatPanel({
   // Keep a stable ref so the initialization effect can call sendMessage
   // without including it in the deps array (avoids re-triggering the effect).
   sendMessageRef.current = sendMessage;
-  handleApplyActionRef.current = handleApplyAction;
 
   // ID of the seed message sent on panel open. It contains prompt-engineering
   // instructions that should not be shown to the user.
@@ -134,44 +133,31 @@ export function useBuilderChatPanel({
     return messages.find((m) => m.role === "user")?.id ?? null;
   }, [messages]);
 
-  // Parsed actions from the last assistant message. Gated on `status ===
-  // "ready"` so the expensive regex parse only runs once per completed AI turn,
-  // not on every streaming chunk.
+  // Parsed actions from all assistant messages, accumulated across turns.
+  // Gated on `status === "ready"` so parsing only runs on completed turns.
   const parsedActions = useMemo(() => {
     if (status !== "ready") return [];
-    const assistantMessages = messages.filter((m) => m.role === "assistant");
-    const last = assistantMessages[assistantMessages.length - 1];
-    if (!last) return [];
-    const text = extractTextFromParts(last.parts);
-    const parsed = parseGraphActions(text);
     const seen = new Set<string>();
-    return parsed.filter((action) => {
-      const key = getActionKey(action);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    return messages
+      .filter((m) => m.role === "assistant")
+      .flatMap((msg) => parseGraphActions(extractTextFromParts(msg.parts)))
+      .filter((action) => {
+        const key = getActionKey(action);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
   }, [messages, status]);
 
-  // After each AI turn: apply parsed actions to the local graph and refresh
-  // the canvas from the server. Gating on parsedActions.length > 0 avoids an
-  // unnecessary refetch after read-only turns (e.g. the initial description).
+  // Close the panel on Escape so keyboard users can dismiss it quickly.
   useEffect(() => {
-    const prev = prevStatusRef.current;
-    prevStatusRef.current = status;
-    if (
-      status === "ready" &&
-      (prev === "streaming" || prev === "submitted") &&
-      parsedActions.length > 0
-    ) {
-      parsedActions.forEach((a) => handleApplyActionRef.current?.(a));
-      if (flowID) {
-        queryClient.invalidateQueries({
-          queryKey: getGetV1GetSpecificGraphQueryKey(flowID),
-        });
-      }
+    if (!isOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setIsOpen(false);
     }
-  }, [status, flowID, queryClient, parsedActions]);
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [isOpen]);
 
   // Send the seed message once per session. `nodes` and `edges` are included in
   // the dep array so this effect always has fresh data; the hasSentSeedMessageRef
@@ -228,6 +214,14 @@ export function useBuilderChatPanel({
         targetHandle: action.targetHandle,
         type: "custom",
       });
+    } else {
+      return;
+    }
+    setAppliedActionKeys((prev) => new Set([...prev, getActionKey(action)]));
+    if (flowID) {
+      queryClient.invalidateQueries({
+        queryKey: getGetV1GetSpecificGraphQueryKey(flowID),
+      });
     }
   }
 
@@ -244,6 +238,7 @@ export function useBuilderChatPanel({
     sessionId,
     nodes,
     parsedActions,
+    appliedActionKeys,
     handleApplyAction,
     seedMessageId,
   };
