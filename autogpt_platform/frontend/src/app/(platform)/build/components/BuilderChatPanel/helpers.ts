@@ -45,6 +45,15 @@ export function serializeGraphForChat(
   return parts.join("\n\n");
 }
 
+export function extractTextFromParts(
+  parts: ReadonlyArray<{ type: string; text?: string }>,
+): string {
+  return parts
+    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .map((p) => p.text)
+    .join("");
+}
+
 export function parseGraphActions(text: string): GraphAction[] {
   const actions: GraphAction[] = [];
   const jsonBlockRegex = /```(?:json)?\s*\n?([\s\S]*?)\n?```/g;

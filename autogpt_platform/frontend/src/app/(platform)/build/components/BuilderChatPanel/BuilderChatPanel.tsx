@@ -11,7 +11,7 @@ import {
 } from "@phosphor-icons/react";
 import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { CustomNode } from "../FlowEditor/nodes/CustomNode/CustomNode";
-import { GraphAction } from "./helpers";
+import { GraphAction, extractTextFromParts } from "./helpers";
 import { useBuilderChatPanel } from "./useBuilderChatPanel";
 
 interface Props {
@@ -32,7 +32,6 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
     sessionId,
     nodes,
     parsedActions,
-    handleApplyAction,
   } = useBuilderChatPanel({ isGraphLoaded });
 
   const [inputValue, setInputValue] = useState("");
@@ -53,9 +52,6 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
     if (!text || !canSend) return;
     setInputValue("");
     sendMessage({ text });
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 50);
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -82,7 +78,6 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
             sessionError={sessionError}
             nodes={nodes}
             parsedActions={parsedActions}
-            onApplyAction={handleApplyAction}
             messagesEndRef={messagesEndRef}
           />
 
@@ -136,7 +131,6 @@ interface MessageListProps {
   sessionError: boolean;
   nodes: CustomNode[];
   parsedActions: GraphAction[];
-  onApplyAction: (action: GraphAction) => void;
   messagesEndRef: React.RefObject<HTMLDivElement>;
 }
 
@@ -146,7 +140,6 @@ function MessageList({
   sessionError,
   nodes,
   parsedActions,
-  onApplyAction,
   messagesEndRef,
 }: MessageListProps) {
   return (
@@ -165,12 +158,7 @@ function MessageList({
       )}
 
       {messages.map((msg) => {
-        const textParts = msg.parts
-          .filter(
-            (p): p is Extract<typeof p, { type: "text" }> => p.type === "text",
-          )
-          .map((p) => p.text)
-          .join("");
+        const textParts = extractTextFromParts(msg.parts);
 
         if (!textParts) return null;
 
@@ -199,14 +187,7 @@ function MessageList({
               action.type === "update_node_input"
                 ? `${action.nodeId}:${action.key}`
                 : `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
-            return (
-              <ActionItem
-                key={key}
-                action={action}
-                nodes={nodes}
-                onApply={() => onApplyAction(action)}
-              />
-            );
+            return <ActionItem key={key} action={action} nodes={nodes} />;
           })}
         </div>
       )}
@@ -219,22 +200,10 @@ function MessageList({
 function ActionItem({
   action,
   nodes,
-  onApply,
 }: {
   action: GraphAction;
   nodes: CustomNode[];
-  onApply: () => void;
 }) {
-  // The AI applies changes server-side via edit_agent; the canvas refreshes
-  // automatically via invalidateQueries. The button starts in the applied state
-  // to reflect that changes are already live — not pending user confirmation.
-  const [applied, setApplied] = useState(true);
-
-  function handleApply() {
-    onApply();
-    setApplied(true);
-  }
-
   const nodeName = (id: string) =>
     nodes.find((n) => n.id === id)?.data.title ?? id;
 
@@ -246,18 +215,9 @@ function ActionItem({
   return (
     <div className="flex items-start justify-between gap-2 rounded bg-white p-2 text-xs shadow-sm">
       <span className="leading-tight text-slate-700">{label}</span>
-      <button
-        onClick={handleApply}
-        disabled={applied}
-        className={cn(
-          "shrink-0 rounded px-2 py-0.5 text-xs font-medium transition-colors",
-          applied
-            ? "bg-green-100 text-green-700"
-            : "bg-violet-600 text-white hover:bg-violet-700",
-        )}
-      >
-        {applied ? "Applied" : "Apply"}
-      </button>
+      <span className="shrink-0 rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+        Applied
+      </span>
     </div>
   );
 }

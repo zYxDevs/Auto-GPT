@@ -12,6 +12,7 @@ import { useEdgeStore } from "../../stores/edgeStore";
 import { useNodeStore } from "../../stores/nodeStore";
 import {
   GraphAction,
+  extractTextFromParts,
   parseGraphActions,
   serializeGraphForChat,
 } from "./helpers";
@@ -52,23 +53,29 @@ export function useBuilderChatPanel({
   useEffect(() => {
     if (!isOpen || sessionId || isCreatingSession || sessionError) return;
 
+    let cancelled = false;
+
     async function createSession() {
       setIsCreatingSession(true);
       try {
         const res = await postV2CreateSession(null);
+        if (cancelled) return;
         if (res.status === 200) {
           setSessionId(res.data.id);
         } else {
           setSessionError(true);
         }
       } catch {
-        setSessionError(true);
+        if (!cancelled) setSessionError(true);
       } finally {
-        setIsCreatingSession(false);
+        if (!cancelled) setIsCreatingSession(false);
       }
     }
 
     createSession();
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen, sessionId, isCreatingSession, sessionError]);
 
   const transport = useMemo(
@@ -118,12 +125,7 @@ export function useBuilderChatPanel({
     const assistantMessages = messages.filter((m) => m.role === "assistant");
     const last = assistantMessages[assistantMessages.length - 1];
     if (!last) return [];
-    const text = last.parts
-      .filter(
-        (p): p is Extract<typeof p, { type: "text" }> => p.type === "text",
-      )
-      .map((p) => p.text)
-      .join("");
+    const text = extractTextFromParts(last.parts);
     const parsed = parseGraphActions(text);
     const seen = new Set<string>();
     return parsed.filter((action) => {
@@ -194,6 +196,9 @@ export function useBuilderChatPanel({
         },
       });
     } else if (action.type === "connect_nodes") {
+      const sourceExists = nodes.some((n) => n.id === action.source);
+      const targetExists = nodes.some((n) => n.id === action.target);
+      if (!sourceExists || !targetExists) return;
       addEdge({
         id: `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`,
         source: action.source,

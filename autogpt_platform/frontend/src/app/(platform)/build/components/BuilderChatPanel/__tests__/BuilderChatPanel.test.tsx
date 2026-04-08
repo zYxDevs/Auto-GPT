@@ -122,7 +122,7 @@ describe("BuilderChatPanel", () => {
     expect(screen.getByText("Applied")).toBeDefined();
   });
 
-  it("shows pre-applied actions as disabled", () => {
+  it("shows applied badge for actions", () => {
     const action = {
       type: "update_node_input" as const,
       nodeId: "1",
@@ -136,10 +136,7 @@ describe("BuilderChatPanel", () => {
       }),
     );
     render(<BuilderChatPanel />);
-    const button = screen.getByRole("button", {
-      name: "Applied",
-    }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
+    expect(screen.getByText("Applied")).toBeDefined();
   });
 
   it("calls sendMessage when the user submits a message", () => {
