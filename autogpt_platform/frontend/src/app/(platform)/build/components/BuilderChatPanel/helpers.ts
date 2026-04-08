@@ -165,9 +165,9 @@ export function getNodeDisplayName(
  * Reused in both the hook (action parsing) and the component (rendering).
  */
 export function extractTextFromParts(
-  parts: ReadonlyArray<{ type: string; text?: string }>,
+  parts: ReadonlyArray<{ type: string; text?: string }> | null | undefined,
 ): string {
-  return parts
+  return (parts ?? [])
     .filter((p): p is { type: "text"; text: string } => p.type === "text")
     .map((p) => p.text)
     .join("");

@@ -796,4 +796,12 @@ describe("extractTextFromParts", () => {
     const parts = [{ type: "text" }, { type: "text", text: "hello" }];
     expect(extractTextFromParts(parts)).toBe("hello");
   });
+
+  it("returns empty string for null parts", () => {
+    expect(extractTextFromParts(null)).toBe("");
+  });
+
+  it("returns empty string for undefined parts", () => {
+    expect(extractTextFromParts(undefined)).toBe("");
+  });
 });
