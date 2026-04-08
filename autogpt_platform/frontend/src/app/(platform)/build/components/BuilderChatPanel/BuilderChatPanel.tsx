@@ -183,8 +183,8 @@ function MessageList({
           <ChatCircle size={28} weight="duotone" className="text-violet-300" />
           <p>Ask me to explain or modify your agent.</p>
           <p className="text-slate-300">
-            You can say things like "What does this agent do?" or "Add a step
-            that formats the output."
+            You can say things like &ldquo;What does this agent do?&rdquo; or
+            &ldquo;Add a step that formats the output.&rdquo;
           </p>
         </div>
       )}
