@@ -2,10 +2,18 @@ import { postV2CreateSession } from "@/app/api/__generated__/endpoints/chat/chat
 import { getGetV1GetSpecificGraphQueryKey } from "@/app/api/__generated__/endpoints/graphs/graphs";
 import { getWebSocketToken } from "@/lib/supabase/actions";
 import { environment } from "@/services/environment";
+import { useToast } from "@/components/molecules/Toast/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { parseAsString, useQueryStates } from "nuqs";
 import { useShallow } from "zustand/react/shallow";
 import { useEdgeStore } from "../../stores/edgeStore";
@@ -16,16 +24,32 @@ import {
   buildSeedPrompt,
   extractTextFromParts,
   getActionKey,
+  getNodeDisplayName,
   parseGraphActions,
   serializeGraphForChat,
 } from "./helpers";
 
 type SendMessageFn = ReturnType<typeof useChat>["sendMessage"];
 
+/** Snapshot of node data taken before an action is applied, enabling undo. */
+interface UndoSnapshot {
+  actionKey: string;
+  restore: () => void;
+}
+
 interface UseBuilderChatPanelArgs {
   isGraphLoaded?: boolean;
 }
 
+/**
+ * useBuilderChatPanel manages all business logic for the collapsible AI chat
+ * panel in the flow builder. It owns session lifecycle, streaming transport,
+ * graph context serialization, action parsing, apply/undo, and input handling.
+ *
+ * @param isGraphLoaded - When true the seed message is sent automatically.
+ *   Pass false (the default) until the graph has finished loading to avoid
+ *   sending an empty context to the AI.
+ */
 export function useBuilderChatPanel({
   isGraphLoaded = false,
 }: UseBuilderChatPanelArgs = {}) {
@@ -36,6 +60,10 @@ export function useBuilderChatPanel({
   const [appliedActionKeys, setAppliedActionKeys] = useState<Set<string>>(
     new Set(),
   );
+  const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
+  // Input state owned here to keep render logic out of the component.
+  const [inputValue, setInputValue] = useState("");
+
   // Guards whether the seed message has been sent for this session.
   const hasSentSeedMessageRef = useRef(false);
   const sendMessageRef = useRef<SendMessageFn | null>(null);
@@ -45,6 +73,7 @@ export function useBuilderChatPanel({
 
   const [{ flowID }] = useQueryStates({ flowID: parseAsString });
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const nodes = useNodeStore(useShallow((s) => s.nodes));
   const edges = useEdgeStore(useShallow((s) => s.edges));
@@ -57,6 +86,7 @@ export function useBuilderChatPanel({
     setSessionId(null);
     setSessionError(false);
     setAppliedActionKeys(new Set());
+    setUndoStack([]);
     hasSentSeedMessageRef.current = false;
   }, [flowID]);
 
@@ -171,7 +201,7 @@ export function useBuilderChatPanel({
   // Close the panel on Escape so keyboard users can dismiss it quickly.
   useEffect(() => {
     if (!isOpen) return;
-    function onKeyDown(e: KeyboardEvent) {
+    function onKeyDown(e: globalThis.KeyboardEvent) {
       if (e.key === "Escape") setIsOpen(false);
     }
     document.addEventListener("keydown", onKeyDown);
@@ -194,6 +224,10 @@ export function useBuilderChatPanel({
     sendMessageRef.current?.({ text: buildSeedPrompt(summary) });
   }, [sessionId, transport, isGraphLoaded, nodes, edges]);
 
+  const isStreaming = status === "streaming" || status === "submitted";
+  const canSend =
+    Boolean(sessionId) && !isCreatingSession && !sessionError && !isStreaming;
+
   function handleToggle() {
     // Reset session error when reopening so the panel can retry session creation
     if (!isOpen && !sessionId) {
@@ -202,14 +236,61 @@ export function useBuilderChatPanel({
     setIsOpen((o) => !o);
   }
 
+  function handleSend() {
+    const text = inputValue.trim();
+    if (!text || !canSend) return;
+    setInputValue("");
+    sendMessage({ text });
+  }
+
+  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }
+
   function handleApplyAction(action: GraphAction) {
     if (action.type === "update_node_input") {
       const node = nodes.find((n) => n.id === action.nodeId);
-      if (!node) return;
+      if (!node) {
+        toast({
+          title: "Cannot apply change",
+          description: `Node "${action.nodeId}" was not found in the graph.`,
+          variant: "destructive",
+        });
+        return;
+      }
       // Reject keys not present in the node's input schema to prevent writing
       // arbitrary fields that the block does not support.
       const schemaProps = node.data.inputSchema?.properties;
-      if (schemaProps && !(action.key in schemaProps)) return;
+      if (schemaProps && !(action.key in schemaProps)) {
+        toast({
+          title: "Cannot apply change",
+          description: `Field "${action.key}" is not a valid input for "${getNodeDisplayName(node, node.id)}".`,
+          variant: "destructive",
+        });
+        return;
+      }
+      // Capture a snapshot before mutating so we can undo.
+      const prevHardcoded = node.data.hardcodedValues;
+      const key = getActionKey(action);
+      setUndoStack((prev) => [
+        ...prev,
+        {
+          actionKey: key,
+          restore: () => {
+            updateNodeData(action.nodeId, {
+              hardcodedValues: prevHardcoded,
+            });
+            setAppliedActionKeys((keys) => {
+              const next = new Set(keys);
+              next.delete(key);
+              return next;
+            });
+          },
+        },
+      ]);
       updateNodeData(action.nodeId, {
         hardcodedValues: {
           ...node.data.hardcodedValues,
@@ -219,12 +300,33 @@ export function useBuilderChatPanel({
     } else if (action.type === "connect_nodes") {
       const sourceNode = nodes.find((n) => n.id === action.source);
       const targetNode = nodes.find((n) => n.id === action.target);
-      if (!sourceNode || !targetNode) return;
+      if (!sourceNode || !targetNode) {
+        toast({
+          title: "Cannot apply connection",
+          description: `One or both nodes (${action.source}, ${action.target}) were not found.`,
+          variant: "destructive",
+        });
+        return;
+      }
       // Validate that the referenced handles exist on the respective nodes.
       const srcProps = sourceNode.data.outputSchema?.properties;
       const tgtProps = targetNode.data.inputSchema?.properties;
-      if (srcProps && !(action.sourceHandle in srcProps)) return;
-      if (tgtProps && !(action.targetHandle in tgtProps)) return;
+      if (srcProps && !(action.sourceHandle in srcProps)) {
+        toast({
+          title: "Cannot apply connection",
+          description: `Output handle "${action.sourceHandle}" does not exist on "${getNodeDisplayName(sourceNode, action.source)}".`,
+          variant: "destructive",
+        });
+        return;
+      }
+      if (tgtProps && !(action.targetHandle in tgtProps)) {
+        toast({
+          title: "Cannot apply connection",
+          description: `Input handle "${action.targetHandle}" does not exist on "${getNodeDisplayName(targetNode, action.target)}".`,
+          variant: "destructive",
+        });
+        return;
+      }
       addEdge({
         id: `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`,
         source: action.source,
@@ -246,6 +348,15 @@ export function useBuilderChatPanel({
     }
   }
 
+  const handleUndoLastAction = useCallback(() => {
+    setUndoStack((prev) => {
+      if (prev.length === 0) return prev;
+      const last = prev[prev.length - 1];
+      last.restore();
+      return prev.slice(0, -1);
+    });
+  }, []);
+
   return {
     isOpen,
     handleToggle,
@@ -261,6 +372,15 @@ export function useBuilderChatPanel({
     parsedActions,
     appliedActionKeys,
     handleApplyAction,
+    undoStack,
+    handleUndoLastAction,
     seedMessageId,
+    // Input handling (owned here to keep component render-only)
+    inputValue,
+    setInputValue,
+    handleSend,
+    handleKeyDown,
+    isStreaming,
+    canSend,
   };
 }

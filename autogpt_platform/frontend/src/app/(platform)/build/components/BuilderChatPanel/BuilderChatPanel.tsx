@@ -3,16 +3,22 @@
 import { Button } from "@/components/atoms/Button/Button";
 import { cn } from "@/lib/utils";
 import {
+  ArrowCounterClockwise,
   ChatCircle,
   PaperPlaneTilt,
   SpinnerGap,
   StopCircle,
   X,
 } from "@phosphor-icons/react";
-import { KeyboardEvent, useEffect, useRef, useState } from "react";
+import { KeyboardEvent, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import type { CustomNode } from "../FlowEditor/nodes/CustomNode/CustomNode";
-import { GraphAction, extractTextFromParts, getActionKey } from "./helpers";
+import {
+  GraphAction,
+  extractTextFromParts,
+  getActionKey,
+  getNodeDisplayName,
+} from "./helpers";
 import { useBuilderChatPanel } from "./useBuilderChatPanel";
 
 interface Props {
@@ -20,31 +26,39 @@ interface Props {
   isGraphLoaded?: boolean;
 }
 
+/**
+ * BuilderChatPanel renders a collapsible AI chat panel for the flow builder.
+ * All business logic lives in `useBuilderChatPanel`.
+ *
+ * `isGraphLoaded` controls when the seed message is sent to the AI — pass
+ * `true` only once the graph has finished loading so the AI receives full context.
+ */
 export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
   const {
     isOpen,
     handleToggle,
     messages,
-    sendMessage,
     stop,
-    status,
     error,
     isCreatingSession,
     sessionError,
-    sessionId,
     nodes,
     parsedActions,
     appliedActionKeys,
     handleApplyAction,
+    undoStack,
+    handleUndoLastAction,
     seedMessageId,
+    inputValue,
+    setInputValue,
+    handleSend,
+    handleKeyDown,
+    isStreaming,
+    canSend,
   } = useBuilderChatPanel({ isGraphLoaded });
 
-  const [inputValue, setInputValue] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const isStreaming = status === "streaming" || status === "submitted";
-  const canSend =
-    Boolean(sessionId) && !isCreatingSession && !sessionError && !isStreaming;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -56,20 +70,6 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
       textareaRef.current?.focus();
     }
   }, [isOpen]);
-
-  function handleSend() {
-    const text = inputValue.trim();
-    if (!text || !canSend) return;
-    setInputValue("");
-    sendMessage({ text });
-  }
-
-  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  }
 
   return (
     <div
@@ -84,7 +84,11 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
           aria-label="Builder chat panel"
           className="pointer-events-auto flex h-[70vh] w-96 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
         >
-          <PanelHeader onClose={handleToggle} />
+          <PanelHeader
+            onClose={handleToggle}
+            undoCount={undoStack.length}
+            onUndo={handleUndoLastAction}
+          />
 
           <MessageList
             messages={messages}
@@ -95,6 +99,7 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
             parsedActions={parsedActions}
             appliedActionKeys={appliedActionKeys}
             onApplyAction={handleApplyAction}
+            onRetry={handleToggle}
             seedMessageId={seedMessageId}
             messagesEndRef={messagesEndRef}
           />
@@ -128,7 +133,15 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
   );
 }
 
-function PanelHeader({ onClose }: { onClose: () => void }) {
+function PanelHeader({
+  onClose,
+  undoCount,
+  onUndo,
+}: {
+  onClose: () => void;
+  undoCount: number;
+  onUndo: () => void;
+}) {
   return (
     <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
       <div className="flex items-center gap-2">
@@ -137,9 +150,22 @@ function PanelHeader({ onClose }: { onClose: () => void }) {
           Chat with Builder
         </span>
       </div>
-      <Button variant="icon" size="icon" onClick={onClose} aria-label="Close">
-        <X size={16} />
-      </Button>
+      <div className="flex items-center gap-1">
+        {undoCount > 0 && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onUndo}
+            aria-label="Undo last applied change"
+            title="Undo last applied change"
+          >
+            <ArrowCounterClockwise size={16} />
+          </Button>
+        )}
+        <Button variant="icon" size="icon" onClick={onClose} aria-label="Close">
+          <X size={16} />
+        </Button>
+      </div>
     </div>
   );
 }
@@ -153,6 +179,7 @@ interface MessageListProps {
   parsedActions: GraphAction[];
   appliedActionKeys: Set<string>;
   onApplyAction: (action: GraphAction) => void;
+  onRetry: () => void;
   seedMessageId: string | null;
   messagesEndRef: React.RefObject<HTMLDivElement>;
 }
@@ -166,6 +193,7 @@ function MessageList({
   parsedActions,
   appliedActionKeys,
   onApplyAction,
+  onRetry,
   seedMessageId,
   messagesEndRef,
 }: MessageListProps) {
@@ -190,7 +218,17 @@ function MessageList({
 
       {sessionError && (
         <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-600">
-          Failed to start chat session. Please close and try again.
+          <p>Failed to start chat session.</p>
+          <button
+            onClick={() => {
+              onRetry();
+              // Toggle twice: close then reopen to re-trigger session creation
+              setTimeout(onRetry, 50);
+            }}
+            className="mt-1 underline hover:no-underline"
+          >
+            Retry
+          </button>
         </div>
       )}
 
@@ -210,6 +248,17 @@ function MessageList({
           </p>
         </div>
       )}
+
+      {visibleMessages.length === 0 &&
+        messages.some((m) => m.id === seedMessageId) && (
+          <div className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2 text-xs text-violet-600">
+            <p className="font-medium">Graph context sent</p>
+            <p className="mt-0.5 text-violet-500">
+              I&apos;ve analysed your agent. Ask me anything about it or tell me
+              what to change.
+            </p>
+          </div>
+        )}
 
       {visibleMessages.map((msg) => {
         const textParts = extractTextFromParts(msg.parts);
@@ -287,15 +336,12 @@ function ActionItem({
   isApplied: boolean;
   onApply: (action: GraphAction) => void;
 }) {
-  const nodeName = (id: string) =>
-    nodes.find((n) => n.id === id)?.data.metadata?.customized_name ||
-    nodes.find((n) => n.id === id)?.data.title ||
-    id;
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
   const label =
     action.type === "update_node_input"
-      ? `Set "${nodeName(action.nodeId)}" "${action.key}" = ${JSON.stringify(action.value)}`
-      : `Connect "${nodeName(action.source)}" -> "${nodeName(action.target)}"`;
+      ? `Set "${getNodeDisplayName(nodeMap.get(action.nodeId), action.nodeId)}" "${action.key}" = ${JSON.stringify(action.value)}`
+      : `Connect "${getNodeDisplayName(nodeMap.get(action.source), action.source)}" → "${getNodeDisplayName(nodeMap.get(action.target), action.target)}"`;
 
   return (
     <div className="flex items-start justify-between gap-2 rounded bg-white p-2 text-xs shadow-sm">
@@ -307,6 +353,7 @@ function ActionItem({
       ) : (
         <button
           onClick={() => onApply(action)}
+          aria-label={`Apply: ${label}`}
           className="shrink-0 rounded bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 hover:bg-violet-200"
         >
           Apply

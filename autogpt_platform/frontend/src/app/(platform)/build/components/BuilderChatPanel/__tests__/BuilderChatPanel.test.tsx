@@ -10,6 +10,9 @@ import {
   serializeGraphForChat,
   parseGraphActions,
   getActionKey,
+  getNodeDisplayName,
+  buildSeedPrompt,
+  extractTextFromParts,
 } from "../helpers";
 import type { CustomNode } from "../../FlowEditor/nodes/CustomNode/CustomNode";
 import type { CustomEdge } from "../../FlowEditor/edges/CustomEdge";
@@ -41,7 +44,15 @@ function makeMockHook(
     parsedActions: [],
     appliedActionKeys: new Set<string>(),
     handleApplyAction: vi.fn(),
+    undoStack: [],
+    handleUndoLastAction: vi.fn(),
     seedMessageId: null,
+    inputValue: "",
+    setInputValue: vi.fn(),
+    handleSend: vi.fn(),
+    handleKeyDown: vi.fn(),
+    isStreaming: false,
+    canSend: false,
     ...overrides,
   };
 }
@@ -120,6 +131,43 @@ describe("BuilderChatPanel", () => {
     expect(screen.getByText("This agent searches the web.")).toBeDefined();
   });
 
+  it("hides the seed message from the chat UI", () => {
+    mockUseBuilderChatPanel.mockReturnValue(
+      makeMockHook({
+        isOpen: true,
+        seedMessageId: "seed-1",
+        messages: [
+          {
+            id: "seed-1",
+            role: "user",
+            parts: [{ type: "text", text: "I'm building an agent..." }],
+          },
+        ] as ReturnType<typeof useBuilderChatPanel>["messages"],
+      }),
+    );
+    render(<BuilderChatPanel />);
+    // The seed message should NOT be visible in the chat list
+    expect(screen.queryByText("I'm building an agent...")).toBeNull();
+  });
+
+  it("shows graph context banner when seed has been sent but no visible messages", () => {
+    mockUseBuilderChatPanel.mockReturnValue(
+      makeMockHook({
+        isOpen: true,
+        seedMessageId: "seed-1",
+        messages: [
+          {
+            id: "seed-1",
+            role: "user",
+            parts: [{ type: "text", text: "I'm building an agent..." }],
+          },
+        ] as ReturnType<typeof useBuilderChatPanel>["messages"],
+      }),
+    );
+    render(<BuilderChatPanel />);
+    expect(screen.getByText("Graph context sent")).toBeDefined();
+  });
+
   it("renders suggested changes section when parsedActions are present", () => {
     mockUseBuilderChatPanel.mockReturnValue(
       makeMockHook({
@@ -136,7 +184,44 @@ describe("BuilderChatPanel", () => {
     );
     render(<BuilderChatPanel />);
     expect(screen.getByText("Suggested changes")).toBeDefined();
-    expect(screen.getByText("Apply")).toBeDefined();
+  });
+
+  it("renders the action label correctly for update_node_input", () => {
+    const nodes = [
+      {
+        id: "1",
+        data: {
+          title: "Search",
+          description: "",
+          hardcodedValues: {},
+          inputSchema: {},
+          outputSchema: {},
+          uiType: 1,
+          block_id: "b1",
+          costs: [],
+          categories: [],
+        },
+        type: "custom" as const,
+        position: { x: 0, y: 0 },
+      },
+    ] as unknown as CustomNode[];
+
+    mockUseBuilderChatPanel.mockReturnValue(
+      makeMockHook({
+        isOpen: true,
+        nodes,
+        parsedActions: [
+          {
+            type: "update_node_input",
+            nodeId: "1",
+            key: "query",
+            value: "AI news",
+          },
+        ],
+      }),
+    );
+    render(<BuilderChatPanel />);
+    expect(screen.getByText(`Set "Search" "query" = "AI news"`)).toBeDefined();
   });
 
   it("shows Apply button for unapplied actions and Applied badge for applied actions", () => {
@@ -150,7 +235,7 @@ describe("BuilderChatPanel", () => {
       makeMockHook({
         isOpen: true,
         parsedActions: [action],
-        appliedActionKeys: new Set(["1:query"]),
+        appliedActionKeys: new Set([getActionKey(action)]),
       }),
     );
     render(<BuilderChatPanel />);
@@ -178,58 +263,59 @@ describe("BuilderChatPanel", () => {
     expect(handleApplyAction).toHaveBeenCalledWith(action);
   });
 
-  it("does not call sendMessage when the textarea is empty", () => {
-    const sendMessage = vi.fn();
+  it("does not call handleSend when the textarea is empty", () => {
+    const handleSend = vi.fn();
     mockUseBuilderChatPanel.mockReturnValue(
-      makeMockHook({ isOpen: true, sessionId: "sess-1", sendMessage }),
+      makeMockHook({
+        isOpen: true,
+        sessionId: "sess-1",
+        canSend: true,
+        inputValue: "",
+        handleSend,
+      }),
     );
     render(<BuilderChatPanel />);
     fireEvent.click(screen.getByLabelText("Send"));
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(handleSend).not.toHaveBeenCalled();
   });
 
-  it("calls sendMessage when the user submits a message", () => {
-    const sendMessage = vi.fn();
+  it("calls handleSend when the Send button is clicked with text", () => {
+    const handleSend = vi.fn();
     mockUseBuilderChatPanel.mockReturnValue(
-      makeMockHook({ isOpen: true, sessionId: "sess-1", sendMessage }),
+      makeMockHook({
+        isOpen: true,
+        sessionId: "sess-1",
+        canSend: true,
+        inputValue: "Add a summarizer block",
+        handleSend,
+      }),
     );
     render(<BuilderChatPanel />);
-    const textarea = screen.getByPlaceholderText(/Ask about your agent/i);
-    fireEvent.change(textarea, { target: { value: "Add a summarizer block" } });
     fireEvent.click(screen.getByLabelText("Send"));
-    expect(sendMessage).toHaveBeenCalledWith({
-      text: "Add a summarizer block",
-    });
+    expect(handleSend).toHaveBeenCalledOnce();
   });
 
-  it("sends message when Enter is pressed", () => {
-    const sendMessage = vi.fn();
+  it("calls handleKeyDown when a key is pressed in the textarea", () => {
+    const handleKeyDown = vi.fn();
     mockUseBuilderChatPanel.mockReturnValue(
-      makeMockHook({ isOpen: true, sessionId: "sess-1", sendMessage }),
+      makeMockHook({
+        isOpen: true,
+        sessionId: "sess-1",
+        canSend: true,
+        inputValue: "Explain this agent",
+        handleKeyDown,
+      }),
     );
     render(<BuilderChatPanel />);
     const textarea = screen.getByPlaceholderText(/Ask about your agent/i);
-    fireEvent.change(textarea, { target: { value: "Explain this agent" } });
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
-    expect(sendMessage).toHaveBeenCalledWith({ text: "Explain this agent" });
-  });
-
-  it("does NOT send message when Shift+Enter is pressed", () => {
-    const sendMessage = vi.fn();
-    mockUseBuilderChatPanel.mockReturnValue(
-      makeMockHook({ isOpen: true, sessionId: "sess-1", sendMessage }),
-    );
-    render(<BuilderChatPanel />);
-    const textarea = screen.getByPlaceholderText(/Ask about your agent/i);
-    fireEvent.change(textarea, { target: { value: "Explain this agent" } });
-    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(handleKeyDown).toHaveBeenCalled();
   });
 
   it("shows Stop button when streaming", () => {
     const stop = vi.fn();
     mockUseBuilderChatPanel.mockReturnValue(
-      makeMockHook({ isOpen: true, status: "streaming", stop }),
+      makeMockHook({ isOpen: true, isStreaming: true, stop }),
     );
     render(<BuilderChatPanel />);
     expect(screen.getByLabelText("Stop")).toBeDefined();
@@ -248,12 +334,13 @@ describe("BuilderChatPanel", () => {
     expect(screen.getByText(/Connection error/i)).toBeDefined();
   });
 
-  it("shows session error message when sessionError is true", () => {
+  it("shows session error message with Retry when sessionError is true", () => {
     mockUseBuilderChatPanel.mockReturnValue(
       makeMockHook({ isOpen: true, sessionError: true }),
     );
     render(<BuilderChatPanel />);
     expect(screen.getByText(/Failed to start chat session/i)).toBeDefined();
+    expect(screen.getByText("Retry")).toBeDefined();
   });
 
   it("renders the panel with role=dialog and message list with role=log", () => {
@@ -261,6 +348,38 @@ describe("BuilderChatPanel", () => {
     render(<BuilderChatPanel />);
     expect(screen.getByRole("dialog")).toBeDefined();
     expect(screen.getByRole("log")).toBeDefined();
+  });
+
+  it("shows undo button in header when undoStack has entries", () => {
+    const handleUndoLastAction = vi.fn();
+    const fakeRestore = vi.fn();
+    mockUseBuilderChatPanel.mockReturnValue(
+      makeMockHook({
+        isOpen: true,
+        undoStack: [{ actionKey: "n1:query", restore: fakeRestore }],
+        handleUndoLastAction,
+      }),
+    );
+    render(<BuilderChatPanel />);
+    const undoBtn = screen.getByLabelText("Undo last applied change");
+    expect(undoBtn).toBeDefined();
+    fireEvent.click(undoBtn);
+    expect(handleUndoLastAction).toHaveBeenCalledOnce();
+  });
+
+  it("does not show undo button when undoStack is empty", () => {
+    mockUseBuilderChatPanel.mockReturnValue(
+      makeMockHook({ isOpen: true, undoStack: [] }),
+    );
+    render(<BuilderChatPanel />);
+    expect(screen.queryByLabelText("Undo last applied change")).toBeNull();
+  });
+
+  it("passes isGraphLoaded to useBuilderChatPanel", () => {
+    render(<BuilderChatPanel isGraphLoaded={true} />);
+    expect(mockUseBuilderChatPanel).toHaveBeenCalledWith({
+      isGraphLoaded: true,
+    });
   });
 });
 
@@ -341,6 +460,55 @@ describe("serializeGraphForChat", () => {
 
     const result = serializeGraphForChat(nodes, []);
     expect(result).toContain("10 additional nodes not shown");
+  });
+
+  it("truncates edges beyond MAX_EDGES limit", () => {
+    const nodes = [
+      {
+        id: "1",
+        data: {
+          title: "A",
+          description: "",
+          hardcodedValues: {},
+          inputSchema: {},
+          outputSchema: {},
+          uiType: 1,
+          block_id: "b1",
+          costs: [],
+          categories: [],
+        },
+        type: "custom" as const,
+        position: { x: 0, y: 0 },
+      },
+      {
+        id: "2",
+        data: {
+          title: "B",
+          description: "",
+          hardcodedValues: {},
+          inputSchema: {},
+          outputSchema: {},
+          uiType: 1,
+          block_id: "b2",
+          costs: [],
+          categories: [],
+        },
+        type: "custom" as const,
+        position: { x: 200, y: 0 },
+      },
+    ] as unknown as CustomNode[];
+
+    const edges = Array.from({ length: 205 }, (_, i) => ({
+      id: `e${i}`,
+      source: "1",
+      target: "2",
+      sourceHandle: `out${i}`,
+      targetHandle: `in${i}`,
+      type: "custom" as const,
+    })) as unknown as CustomEdge[];
+
+    const result = serializeGraphForChat(nodes, edges);
+    expect(result).toContain("5 additional connections not shown");
   });
 
   it("lists connections between nodes", () => {
@@ -495,7 +663,7 @@ Here are the changes:
 });
 
 describe("getActionKey", () => {
-  it("returns nodeId:key for update_node_input", () => {
+  it("returns nodeId:key:value for update_node_input (includes value for multi-turn dedup)", () => {
     expect(
       getActionKey({
         type: "update_node_input",
@@ -503,7 +671,23 @@ describe("getActionKey", () => {
         key: "query",
         value: "test",
       }),
-    ).toBe("1:query");
+    ).toBe('1:query:"test"');
+  });
+
+  it("generates distinct keys for same node+key but different values", () => {
+    const key1 = getActionKey({
+      type: "update_node_input",
+      nodeId: "1",
+      key: "query",
+      value: "first",
+    });
+    const key2 = getActionKey({
+      type: "update_node_input",
+      nodeId: "1",
+      key: "query",
+      value: "corrected",
+    });
+    expect(key1).not.toBe(key2);
   });
 
   it("returns source:handle->target:handle for connect_nodes", () => {
@@ -516,5 +700,92 @@ describe("getActionKey", () => {
         targetHandle: "input",
       }),
     ).toBe("1:result->2:input");
+  });
+});
+
+describe("getNodeDisplayName", () => {
+  it("returns customized_name when set", () => {
+    const node = {
+      id: "1",
+      data: {
+        title: "Original",
+        metadata: { customized_name: "My Custom" },
+      },
+    } as unknown as CustomNode;
+    expect(getNodeDisplayName(node, "fallback")).toBe("My Custom");
+  });
+
+  it("falls back to title when no customized_name", () => {
+    const node = {
+      id: "1",
+      data: { title: "Block Title" },
+    } as unknown as CustomNode;
+    expect(getNodeDisplayName(node, "fallback")).toBe("Block Title");
+  });
+
+  it("falls back to the provided fallback when node is undefined", () => {
+    expect(getNodeDisplayName(undefined, "raw-id")).toBe("raw-id");
+  });
+});
+
+describe("buildSeedPrompt", () => {
+  it("starts with SEED_PROMPT_PREFIX", () => {
+    const result = buildSeedPrompt("summary");
+    expect(result.startsWith("I'm building an agent")).toBe(true);
+  });
+
+  it("wraps summary in <graph_context> tags", () => {
+    const result = buildSeedPrompt("some graph summary");
+    expect(result).toContain(
+      "<graph_context>\nsome graph summary\n</graph_context>",
+    );
+  });
+
+  it("includes format instructions for update_node_input", () => {
+    const result = buildSeedPrompt("");
+    expect(result).toContain('"action": "update_node_input"');
+  });
+
+  it("includes format instructions for connect_nodes", () => {
+    const result = buildSeedPrompt("");
+    expect(result).toContain('"action": "connect_nodes"');
+  });
+
+  it("ends with a question to prompt an AI response", () => {
+    const result = buildSeedPrompt("");
+    expect(result.trim().endsWith("What does this agent do?")).toBe(true);
+  });
+});
+
+describe("extractTextFromParts", () => {
+  it("returns empty string for empty array", () => {
+    expect(extractTextFromParts([])).toBe("");
+  });
+
+  it("concatenates text parts in order", () => {
+    const parts = [
+      { type: "text", text: "Hello, " },
+      { type: "text", text: "world!" },
+    ];
+    expect(extractTextFromParts(parts)).toBe("Hello, world!");
+  });
+
+  it("ignores non-text parts", () => {
+    const parts = [
+      { type: "text", text: "visible" },
+      { type: "tool-call", text: "ignored" },
+      { type: "text", text: " text" },
+    ];
+    expect(extractTextFromParts(parts)).toBe("visible text");
+  });
+
+  it("returns empty string when all parts are non-text", () => {
+    const parts = [{ type: "tool-result" }, { type: "image" }];
+    expect(extractTextFromParts(parts)).toBe("");
+  });
+
+  it("handles parts without a text field", () => {
+    const parts = [{ type: "text" }, { type: "text", text: "hello" }];
+    expect(extractTextFromParts(parts)).toBe("hello");
   });
 });

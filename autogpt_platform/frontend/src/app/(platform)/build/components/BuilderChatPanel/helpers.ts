@@ -52,11 +52,7 @@ export function serializeGraphForChat(
 
   const visibleNodes = nodes.slice(0, MAX_NODES);
   const nodeLines = visibleNodes.map((n) => {
-    const name = sanitizeForXml(
-      (n.data.metadata?.customized_name as string | undefined) ||
-        n.data.title ||
-        "",
-    );
+    const name = sanitizeForXml(getNodeDisplayName(n, ""));
     const desc = n.data.description
       ? ` — ${sanitizeForXml(n.data.description)}`
       : "";
@@ -68,19 +64,15 @@ export function serializeGraphForChat(
       ? `\n(${nodes.length - MAX_NODES} additional nodes not shown)`
       : "";
 
+  // Pre-build a Map for O(1) lookups when serializing edges.
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
   const visibleEdges = edges.slice(0, MAX_EDGES);
   const edgeLines = visibleEdges.map((e) => {
-    const src = nodes.find((n) => n.id === e.source);
-    const tgt = nodes.find((n) => n.id === e.target);
     const srcName = sanitizeForXml(
-      (src?.data.metadata?.customized_name as string | undefined) ||
-        src?.data.title ||
-        e.source,
+      getNodeDisplayName(nodeMap.get(e.source), e.source),
     );
     const tgtName = sanitizeForXml(
-      (tgt?.data.metadata?.customized_name as string | undefined) ||
-        tgt?.data.title ||
-        e.target,
+      getNodeDisplayName(nodeMap.get(e.target), e.target),
     );
     return `- "${srcName}" (${e.sourceHandle}) → "${tgtName}" (${e.targetHandle})`;
   });
@@ -134,12 +126,30 @@ export function buildSeedPrompt(summary: string): string {
 
 /**
  * Returns a stable deduplication key for a GraphAction.
- * Used for both React list keys and seen-set deduplication in the hook.
+ * Includes the value for update_node_input so that corrected AI suggestions
+ * (same node + key, different value) in later turns are not silently dropped
+ * by the seen-set deduplication in the hook.
  */
 export function getActionKey(action: GraphAction): string {
   return action.type === "update_node_input"
-    ? `${action.nodeId}:${action.key}`
+    ? `${action.nodeId}:${action.key}:${JSON.stringify(action.value)}`
     : `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
+}
+
+/**
+ * Resolves the display name for a node: prefers the user-customized name,
+ * falls back to the block title, then to the raw ID.
+ * Shared between `serializeGraphForChat` and `ActionItem` to avoid duplication.
+ */
+export function getNodeDisplayName(
+  node: CustomNode | undefined,
+  fallback: string,
+): string {
+  return (
+    (node?.data.metadata?.customized_name as string | undefined) ||
+    node?.data.title ||
+    fallback
+  );
 }
 
 /**
