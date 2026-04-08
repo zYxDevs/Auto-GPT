@@ -88,6 +88,9 @@ export function useBuilderChatPanel({
     setAppliedActionKeys(new Set());
     setUndoStack([]);
     hasSentSeedMessageRef.current = false;
+    // Also reset the creation ref so a new session can be started after
+    // navigation, even if one was in-flight when flowID changed.
+    isCreatingSessionRef.current = false;
   }, [flowID]);
 
   useEffect(() => {
