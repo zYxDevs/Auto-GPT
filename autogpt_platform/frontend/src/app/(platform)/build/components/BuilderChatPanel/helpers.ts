@@ -5,6 +5,10 @@ import type { CustomEdge } from "../FlowEditor/edges/CustomEdge";
 const MAX_NODES = 100;
 /** Maximum edges serialized into the AI context to prevent token overruns. */
 const MAX_EDGES = 200;
+/** Maximum characters of a node description included in the seed prompt. */
+const MAX_DESC_CHARS = 500;
+/** Matches fenced JSON code blocks in AI responses. Module-scoped to avoid recompilation. */
+const JSON_BLOCK_REGEX = /```(?:json)?\s*\n?([\s\S]*?)\n?```/g;
 
 /** Escapes XML special characters in user-controlled strings before embedding in prompts. */
 function sanitizeForXml(s: string): string {
@@ -58,9 +62,8 @@ export function serializeGraphForChat(
   const visibleNodes = nodes.slice(0, MAX_NODES);
   const nodeLines = visibleNodes.map((n) => {
     const name = sanitizeForXml(getNodeDisplayName(n, ""));
-    const desc = n.data.description
-      ? ` — ${sanitizeForXml(n.data.description)}`
-      : "";
+    const rawDesc = n.data.description?.slice(0, MAX_DESC_CHARS) ?? "";
+    const desc = rawDesc ? ` — ${sanitizeForXml(rawDesc)}` : "";
     return `- Node ${n.id}: "${name}"${desc}`;
   });
 
@@ -183,10 +186,10 @@ export function extractTextFromParts(
  */
 export function parseGraphActions(text: string): GraphAction[] {
   const actions: GraphAction[] = [];
-  const jsonBlockRegex = /```(?:json)?\s*\n?([\s\S]*?)\n?```/g;
+  JSON_BLOCK_REGEX.lastIndex = 0;
   let match: RegExpExecArray | null;
 
-  while ((match = jsonBlockRegex.exec(text)) !== null) {
+  while ((match = JSON_BLOCK_REGEX.exec(text)) !== null) {
     try {
       const parsed = JSON.parse(match[1]) as unknown;
       if (

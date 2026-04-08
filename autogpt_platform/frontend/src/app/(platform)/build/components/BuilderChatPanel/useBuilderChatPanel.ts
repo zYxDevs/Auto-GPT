@@ -64,10 +64,8 @@ export function useBuilderChatPanel({
 
   const nodes = useNodeStore(useShallow((s) => s.nodes));
   const edges = useEdgeStore(useShallow((s) => s.edges));
-  const updateNodeData = useNodeStore(useShallow((s) => s.updateNodeData));
-  const setNodes = useNodeStore(useShallow((s) => s.setNodes));
-  const addEdge = useEdgeStore(useShallow((s) => s.addEdge));
-  const setEdges = useEdgeStore(useShallow((s) => s.setEdges));
+  const setNodes = useNodeStore((s) => s.setNodes);
+  const setEdges = useEdgeStore((s) => s.setEdges);
 
   // Reset session and seed-sent guard when the user navigates to a different
   // graph so the new graph's context is sent to the AI on next open.
@@ -267,11 +265,25 @@ export function useBuilderChatPanel({
         });
         return;
       }
-      // Capture a full nodes snapshot before mutating. The restore function
-      // uses setNodes (not updateNodeData) to bypass the history store —
-      // otherwise the global Ctrl+Z undo would conflict with the chat panel's
-      // own undo stack by re-applying the just-undone change.
+      // Capture a full nodes snapshot before mutating. Both the apply and the
+      // restore use setNodes (not updateNodeData) to bypass the global history
+      // store — this keeps chat-panel changes completely separate from Ctrl+Z,
+      // preventing the "Applied" badge from going stale after a global undo.
       const prevNodes = useNodeStore.getState().nodes;
+      const nextNodes = prevNodes.map((n) =>
+        n.id === action.nodeId
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                hardcodedValues: {
+                  ...n.data.hardcodedValues,
+                  [action.key]: action.value,
+                },
+              },
+            }
+          : n,
+      );
       const key = getActionKey(action);
       setUndoStack((prev) => [
         ...prev,
@@ -287,12 +299,7 @@ export function useBuilderChatPanel({
           },
         },
       ]);
-      updateNodeData(action.nodeId, {
-        hardcodedValues: {
-          ...node.data.hardcodedValues,
-          [action.key]: action.value,
-        },
-      });
+      setNodes(nextNodes);
     } else if (action.type === "connect_nodes") {
       const sourceNode = nodes.find((n) => n.id === action.source);
       const targetNode = nodes.find((n) => n.id === action.target);
@@ -324,9 +331,9 @@ export function useBuilderChatPanel({
         return;
       }
       const edgeId = `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
-      // Capture a full edges snapshot before mutating. The restore function
-      // uses setEdges (not removeEdge) to bypass the history store —
-      // otherwise the global Ctrl+Z undo would re-add the just-removed edge.
+      // Capture a full edges snapshot before mutating. Both the apply and the
+      // restore use setEdges (not addEdge/removeEdge) to bypass the global
+      // history store — keeps chat-panel changes separate from Ctrl+Z.
       const prevEdges = useEdgeStore.getState().edges;
       const key = getActionKey(action);
       setUndoStack((prev) => [
@@ -343,14 +350,17 @@ export function useBuilderChatPanel({
           },
         },
       ]);
-      addEdge({
-        id: edgeId,
-        source: action.source,
-        target: action.target,
-        sourceHandle: action.sourceHandle,
-        targetHandle: action.targetHandle,
-        type: "custom",
-      });
+      setEdges([
+        ...prevEdges,
+        {
+          id: edgeId,
+          source: action.source,
+          target: action.target,
+          sourceHandle: action.sourceHandle,
+          targetHandle: action.targetHandle,
+          type: "custom",
+        },
+      ]);
     } else {
       // Exhaustiveness guard — TypeScript ensures all GraphAction types are handled above.
       const _: never = action;

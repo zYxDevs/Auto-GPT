@@ -10,22 +10,17 @@ vi.mock("zustand/react/shallow", () => ({
 
 const mockNodes: unknown[] = [];
 const mockEdges: unknown[] = [];
-const mockUpdateNodeData = vi.fn();
 const mockSetNodes = vi.fn();
-const mockAddEdge = vi.fn();
 const mockSetEdges = vi.fn();
-const mockRemoveEdge = vi.fn();
 
 vi.mock("../../../stores/nodeStore", () => {
   const useNodeStore = (selector: (s: unknown) => unknown) =>
     selector({
       nodes: mockNodes,
-      updateNodeData: mockUpdateNodeData,
       setNodes: mockSetNodes,
     });
   useNodeStore.getState = () => ({
     nodes: mockNodes,
-    updateNodeData: mockUpdateNodeData,
     setNodes: mockSetNodes,
   });
   return { useNodeStore };
@@ -35,15 +30,11 @@ vi.mock("../../../stores/edgeStore", () => {
   const useEdgeStore = (selector: (s: unknown) => unknown) =>
     selector({
       edges: mockEdges,
-      addEdge: mockAddEdge,
       setEdges: mockSetEdges,
-      removeEdge: mockRemoveEdge,
     });
   useEdgeStore.getState = () => ({
     edges: mockEdges,
-    addEdge: mockAddEdge,
     setEdges: mockSetEdges,
-    removeEdge: mockRemoveEdge,
   });
   return { useEdgeStore };
 });
@@ -112,11 +103,8 @@ beforeEach(() => {
   mockEdges.length = 0;
   mockChatMessages = [];
   mockChatStatus = "ready";
-  mockUpdateNodeData.mockClear();
   mockSetNodes.mockClear();
-  mockAddEdge.mockClear();
   mockSetEdges.mockClear();
-  mockRemoveEdge.mockClear();
   mockPostV2CreateSession.mockClear();
   mockInvalidateQueries.mockClear();
   mockSendMessage.mockClear();
@@ -353,7 +341,7 @@ describe("useBuilderChatPanel – apply does not trigger cache refetch", () => {
 });
 
 describe("useBuilderChatPanel – handleApplyAction", () => {
-  it("update_node_input: calls updateNodeData with merged hardcodedValues", () => {
+  it("update_node_input: calls setNodes with merged hardcodedValues (bypasses history)", () => {
     mockNodes.push({
       id: "node-1",
       data: { hardcodedValues: { existing: "value" } },
@@ -369,9 +357,12 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
       });
     });
 
-    expect(mockUpdateNodeData).toHaveBeenCalledWith("node-1", {
-      hardcodedValues: { existing: "value", query: "AI news" },
-    });
+    expect(mockSetNodes).toHaveBeenCalledWith([
+      {
+        id: "node-1",
+        data: { hardcodedValues: { existing: "value", query: "AI news" } },
+      },
+    ]);
   });
 
   it("update_node_input: shows toast when node not found", () => {
@@ -386,13 +377,13 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
       });
     });
 
-    expect(mockUpdateNodeData).not.toHaveBeenCalled();
+    expect(mockSetNodes).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ variant: "destructive" }),
     );
   });
 
-  it("connect_nodes: calls addEdge when both nodes exist", () => {
+  it("connect_nodes: calls setEdges with new edge appended (bypasses history)", () => {
     mockNodes.push({ id: "src", data: {} }, { id: "tgt", data: {} });
     const { result } = renderHook(() => useBuilderChatPanel());
 
@@ -406,17 +397,21 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
       });
     });
 
-    expect(mockAddEdge).toHaveBeenCalledWith({
-      id: "src:output->tgt:input",
-      source: "src",
-      target: "tgt",
-      sourceHandle: "output",
-      targetHandle: "input",
-      type: "custom",
-    });
+    expect(mockSetEdges).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "src:output->tgt:input",
+          source: "src",
+          target: "tgt",
+          sourceHandle: "output",
+          targetHandle: "input",
+          type: "custom",
+        }),
+      ]),
+    );
   });
 
-  it("connect_nodes: shows toast and does NOT call addEdge when source node is missing", () => {
+  it("connect_nodes: shows toast and does NOT call setEdges when source node is missing", () => {
     mockNodes.push({ id: "tgt", data: {} });
     const { result } = renderHook(() => useBuilderChatPanel());
 
@@ -430,13 +425,13 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
       });
     });
 
-    expect(mockAddEdge).not.toHaveBeenCalled();
+    expect(mockSetEdges).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ variant: "destructive" }),
     );
   });
 
-  it("connect_nodes: shows toast and does NOT call addEdge when target node is missing", () => {
+  it("connect_nodes: shows toast and does NOT call setEdges when target node is missing", () => {
     mockNodes.push({ id: "src", data: {} });
     const { result } = renderHook(() => useBuilderChatPanel());
 
@@ -450,7 +445,7 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
       });
     });
 
-    expect(mockAddEdge).not.toHaveBeenCalled();
+    expect(mockSetEdges).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ variant: "destructive" }),
     );
@@ -475,7 +470,7 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
       });
     });
 
-    expect(mockUpdateNodeData).not.toHaveBeenCalled();
+    expect(mockSetNodes).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ variant: "destructive" }),
     );
@@ -500,9 +495,15 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
       });
     });
 
-    expect(mockUpdateNodeData).toHaveBeenCalledWith("node-1", {
-      hardcodedValues: { query: "AI news" },
-    });
+    expect(mockSetNodes).toHaveBeenCalledWith([
+      {
+        id: "node-1",
+        data: {
+          hardcodedValues: { query: "AI news" },
+          inputSchema: { properties: { query: {} } },
+        },
+      },
+    ]);
   });
 
   it("connect_nodes: rejects sourceHandle not in outputSchema", () => {
@@ -522,7 +523,7 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
       });
     });
 
-    expect(mockAddEdge).not.toHaveBeenCalled();
+    expect(mockSetEdges).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ variant: "destructive" }),
     );
@@ -545,13 +546,13 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
       });
     });
 
-    expect(mockAddEdge).not.toHaveBeenCalled();
+    expect(mockSetEdges).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ variant: "destructive" }),
     );
   });
 
-  it("connect_nodes: calls addEdge when both handles are valid according to schemas", () => {
+  it("connect_nodes: calls setEdges when both handles are valid according to schemas", () => {
     mockNodes.push(
       { id: "src", data: { outputSchema: { properties: { result: {} } } } },
       { id: "tgt", data: { inputSchema: { properties: { input: {} } } } },
@@ -568,14 +569,18 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
       });
     });
 
-    expect(mockAddEdge).toHaveBeenCalledWith({
-      id: "src:result->tgt:input",
-      source: "src",
-      target: "tgt",
-      sourceHandle: "result",
-      targetHandle: "input",
-      type: "custom",
-    });
+    expect(mockSetEdges).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "src:result->tgt:input",
+          source: "src",
+          target: "tgt",
+          sourceHandle: "result",
+          targetHandle: "input",
+          type: "custom",
+        }),
+      ]),
+    );
   });
 
   it("adds action key to appliedActionKeys after successful apply", () => {
@@ -618,8 +623,7 @@ describe("useBuilderChatPanel – undo", () => {
 
     expect(result.current.undoStack).toHaveLength(1);
 
-    // Clear call history so we can verify undo only uses setNodes (not updateNodeData)
-    mockUpdateNodeData.mockClear();
+    // Clear call history so we can verify undo uses setNodes with the original snapshot
     mockSetNodes.mockClear();
 
     act(() => {
@@ -628,8 +632,6 @@ describe("useBuilderChatPanel – undo", () => {
 
     // setNodes is called with the captured snapshot to bypass the global history store
     expect(mockSetNodes).toHaveBeenCalledWith([initialNode]);
-    // updateNodeData must NOT be called during undo to avoid pushing to history store
-    expect(mockUpdateNodeData).not.toHaveBeenCalled();
     expect(result.current.undoStack).toHaveLength(0);
   });
 
@@ -673,16 +675,17 @@ describe("useBuilderChatPanel – undo", () => {
       });
     });
 
-    expect(mockAddEdge).toHaveBeenCalledOnce();
+    expect(mockSetEdges).toHaveBeenCalledOnce();
     expect(result.current.undoStack).toHaveLength(1);
+
+    mockSetEdges.mockClear();
 
     act(() => {
       result.current.handleUndoLastAction();
     });
 
-    // setEdges is called with the captured snapshot to bypass the global history store
+    // setEdges is called with the original captured snapshot to bypass the global history store
     expect(mockSetEdges).toHaveBeenCalledWith([initialEdge]);
-    expect(mockRemoveEdge).not.toHaveBeenCalled();
     expect(result.current.undoStack).toHaveLength(0);
     expect(result.current.appliedActionKeys.size).toBe(0);
   });
