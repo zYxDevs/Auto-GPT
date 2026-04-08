@@ -35,6 +35,9 @@ export function useBuilderChatPanel({
   // Guards whether the seed message has been sent for this session.
   const hasSentSeedMessageRef = useRef(false);
   const sendMessageRef = useRef<SendMessageFn | null>(null);
+  const handleApplyActionRef = useRef<((action: GraphAction) => void) | null>(
+    null,
+  );
   const prevStatusRef = useRef<string>("ready");
 
   const [{ flowID }] = useQueryStates({ flowID: parseAsString });
@@ -122,6 +125,7 @@ export function useBuilderChatPanel({
   // Keep a stable ref so the initialization effect can call sendMessage
   // without including it in the deps array (avoids re-triggering the effect).
   sendMessageRef.current = sendMessage;
+  handleApplyActionRef.current = handleApplyAction;
 
   // Parsed actions from the last assistant message. Gated on `status ===
   // "ready"` so the expensive regex parse only runs once per completed AI turn,
@@ -142,23 +146,25 @@ export function useBuilderChatPanel({
     });
   }, [messages, status]);
 
-  // Refresh the canvas only when the AI turn actually mutated the graph via
-  // edit_agent. Gating on parsedActions.length > 0 avoids an unnecessary
-  // refetch after read-only turns (e.g. the initial description response).
+  // After each AI turn: apply parsed actions to the local graph and refresh
+  // the canvas from the server. Gating on parsedActions.length > 0 avoids an
+  // unnecessary refetch after read-only turns (e.g. the initial description).
   useEffect(() => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = status;
     if (
       status === "ready" &&
       (prev === "streaming" || prev === "submitted") &&
-      flowID &&
       parsedActions.length > 0
     ) {
-      queryClient.invalidateQueries({
-        queryKey: getGetV1GetSpecificGraphQueryKey(flowID),
-      });
+      parsedActions.forEach((a) => handleApplyActionRef.current?.(a));
+      if (flowID) {
+        queryClient.invalidateQueries({
+          queryKey: getGetV1GetSpecificGraphQueryKey(flowID),
+        });
+      }
     }
-  }, [status, flowID, queryClient, parsedActions.length]);
+  }, [status, flowID, queryClient, parsedActions]);
 
   // Send the seed message once per session. `nodes` and `edges` are included in
   // the dep array so this effect always has fresh data; the hasSentSeedMessageRef
