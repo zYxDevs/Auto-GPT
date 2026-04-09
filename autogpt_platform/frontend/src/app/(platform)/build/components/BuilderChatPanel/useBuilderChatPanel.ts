@@ -207,7 +207,11 @@ export function useBuilderChatPanel({
         ? new DefaultChatTransport({
             api: `${environment.getAGPTServerBaseUrl()}/api/chat/sessions/${sessionId}/stream`,
             prepareSendMessagesRequest: async ({ messages }) => {
-              const last = messages[messages.length - 1];
+              const last = messages.at(-1);
+              if (!last)
+                throw new Error(
+                  "No message to send — messages array is empty.",
+                );
               const { token, error } = await getWebSocketToken();
               if (error || !token)
                 throw new Error(

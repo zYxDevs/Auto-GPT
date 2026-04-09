@@ -252,6 +252,58 @@ describe("useBuilderChatPanel – no auto-send on open", () => {
   });
 });
 
+describe("useBuilderChatPanel – seed message", () => {
+  it("sends seed message via sendMessage when session is available and isGraphLoaded=true", async () => {
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-seed" },
+    });
+    mockNodes.push({ id: "n1", data: { title: "Search", description: "" } });
+
+    const { result } = renderHook(() =>
+      useBuilderChatPanel({ isGraphLoaded: true }),
+    );
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    expect(mockSendMessage).toHaveBeenCalledOnce();
+    const callArg = mockSendMessage.mock.calls[0][0] as { text: string };
+    expect(typeof callArg.text).toBe("string");
+    expect(callArg.text).toContain("I'm building an agent");
+  });
+
+  it("does NOT send seed message when isGraphLoaded is false (default)", async () => {
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-no-seed" },
+    });
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("sends seed message only once even when sessionId and isGraphLoaded deps re-run (hasSentSeedMessageRef guard)", async () => {
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-once" },
+    });
+
+    const { result, rerender } = renderHook(() =>
+      useBuilderChatPanel({ isGraphLoaded: true }),
+    );
+
+    await openAndFlush(() => result.current.handleToggle());
+    expect(mockSendMessage).toHaveBeenCalledOnce();
+
+    rerender();
+
+    expect(mockSendMessage).toHaveBeenCalledOnce();
+  });
+});
+
 describe("useBuilderChatPanel – flowID reset", () => {
   it("resets appliedActionKeys when flowID changes", () => {
     mockNodes.push({ id: "n1", data: { hardcodedValues: {} } });
@@ -1207,6 +1259,31 @@ describe("useBuilderChatPanel – transport prepareSendMessagesRequest", () => {
     await expect(
       ctorArg.prepareSendMessagesRequest({ messages }),
     ).rejects.toThrow("Authentication failed");
+  });
+
+  it("throws when messages array is empty (empty messages guard)", async () => {
+    const { DefaultChatTransport } = await import("ai");
+    const MockTransport = DefaultChatTransport as ReturnType<typeof vi.fn>;
+
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-empty-msg" },
+    });
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    const ctorArg = MockTransport.mock.calls[
+      MockTransport.mock.calls.length - 1
+    ][0] as {
+      prepareSendMessagesRequest: (args: {
+        messages: unknown[];
+      }) => Promise<unknown>;
+    };
+    await expect(
+      ctorArg.prepareSendMessagesRequest({ messages: [] }),
+    ).rejects.toThrow("No message to send");
   });
 });
 
