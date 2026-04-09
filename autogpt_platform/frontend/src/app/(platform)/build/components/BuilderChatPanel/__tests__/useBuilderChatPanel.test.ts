@@ -1256,3 +1256,58 @@ describe("useBuilderChatPanel – inputValue resets on flowID change", () => {
     expect(result.current.inputValue).toBe("");
   });
 });
+
+describe("useBuilderChatPanel – prototype pollution guard", () => {
+  it("rejects __proto__ as a key when node has an inputSchema with properties", () => {
+    mockNodes.push({
+      id: "n-proto",
+      data: {
+        hardcodedValues: {},
+        inputSchema: { properties: { query: {} } },
+      },
+    });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    const protoBefore = Object.prototype.hasOwnProperty("injected");
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "update_node_input",
+        nodeId: "n-proto",
+        key: "__proto__",
+        value: "injected",
+      });
+    });
+
+    expect(mockSetNodes).not.toHaveBeenCalled();
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ variant: "destructive" }),
+    );
+    expect(Object.prototype.hasOwnProperty("injected")).toBe(protoBefore);
+  });
+
+  it("rejects constructor as a key when node has an inputSchema with properties", () => {
+    mockNodes.push({
+      id: "n-ctor",
+      data: {
+        hardcodedValues: {},
+        inputSchema: { properties: { query: {} } },
+      },
+    });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "update_node_input",
+        nodeId: "n-ctor",
+        key: "constructor",
+        value: "injected",
+      });
+    });
+
+    expect(mockSetNodes).not.toHaveBeenCalled();
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ variant: "destructive" }),
+    );
+  });
+});

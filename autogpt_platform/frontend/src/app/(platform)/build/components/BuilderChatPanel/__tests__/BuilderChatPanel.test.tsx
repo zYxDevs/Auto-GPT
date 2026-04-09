@@ -262,7 +262,7 @@ describe("BuilderChatPanel", () => {
     expect(handleApplyAction).toHaveBeenCalledWith(action);
   });
 
-  it("does not call handleSend when the textarea is empty", () => {
+  it("does not call handleSend when the textarea is empty and Send button is disabled", () => {
     const handleSend = vi.fn();
     mockUseBuilderChatPanel.mockReturnValue(
       makeMockHook({
@@ -274,7 +274,9 @@ describe("BuilderChatPanel", () => {
       }),
     );
     render(<BuilderChatPanel />);
-    fireEvent.click(screen.getByLabelText("Send"));
+    const sendButton = screen.getByLabelText("Send");
+    expect((sendButton as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(sendButton);
     expect(handleSend).not.toHaveBeenCalled();
   });
 

@@ -447,6 +447,7 @@ function PanelInput({
           onKeyDown={onKeyDown}
           placeholder="Ask about your agent... (Enter to send, Shift+Enter for newline)"
           rows={2}
+          maxLength={4000}
           className="flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-1 focus:ring-violet-200 disabled:opacity-50"
         />
         {isStreaming ? (
