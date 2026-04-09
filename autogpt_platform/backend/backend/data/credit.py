@@ -1258,7 +1258,7 @@ async def set_auto_top_up(user_id: str, config: AutoTopUpConfig):
         where={"id": user_id},
         data={"topUpConfig": SafeJson(config.model_dump())},
     )
-    get_user_by_id.cache_delete(user_id)  # type: ignore[attr-defined]
+    get_user_by_id.cache_delete(user_id)
 
 
 async def set_subscription_tier(user_id: str, tier: SubscriptionTier) -> None:
@@ -1267,7 +1267,7 @@ async def set_subscription_tier(user_id: str, tier: SubscriptionTier) -> None:
         where={"id": user_id},
         data={"subscriptionTier": tier},
     )
-    get_user_by_id.cache_delete(user_id)  # type: ignore[attr-defined]
+    get_user_by_id.cache_delete(user_id)
 
 
 async def get_auto_top_up(user_id: str) -> AutoTopUpConfig:
@@ -1290,7 +1290,7 @@ async def get_subscription_cost(user_id: str, tier: SubscriptionTier) -> int:
         return 0
 
     cost = await get_feature_flag_value(flag.value, user_id, default=0)
-    return int(cost) if isinstance(cost, (int, float)) else 0
+    return max(0, int(cost)) if isinstance(cost, (int, float)) else 0
 
 
 async def get_subscription_price_id(tier: SubscriptionTier) -> str | None:

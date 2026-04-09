@@ -5,7 +5,7 @@ import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Annotated, Any, Sequence, get_args
+from typing import Annotated, Any, Literal, Sequence, get_args
 
 import pydantic
 import stripe
@@ -24,6 +24,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.concurrency import run_in_threadpool
+from prisma.enums import SubscriptionTier
 from pydantic import BaseModel
 from starlette.status import HTTP_204_NO_CONTENT, HTTP_404_NOT_FOUND
 from typing_extensions import Optional, TypedDict
@@ -687,7 +688,7 @@ async def get_user_auto_top_up(
 
 
 class SubscriptionTierRequest(BaseModel):
-    tier: str
+    tier: Literal["FREE", "PRO", "BUSINESS"]
     success_url: str = ""
     cancel_url: str = ""
 
@@ -712,10 +713,6 @@ class SubscriptionStatusResponse(BaseModel):
 async def get_subscription_status(
     user_id: Annotated[str, Security(get_user_id)],
 ) -> SubscriptionStatusResponse:
-    from prisma.enums import SubscriptionTier
-
-    from backend.data.user import get_user_by_id
-
     user = await get_user_by_id(user_id)
     tier = user.subscription_tier or SubscriptionTier.FREE
     cost = await get_subscription_cost(user_id, tier)
@@ -741,24 +738,8 @@ async def update_subscription_tier(
     request: SubscriptionTierRequest,
     user_id: Annotated[str, Security(get_user_id)],
 ) -> SubscriptionCheckoutResponse:
-    from prisma.enums import SubscriptionTier
-
-    from backend.util.feature_flag import Flag, is_feature_enabled
-
-    _SELF_SERVICE_TIERS = {"FREE", "PRO", "BUSINESS"}
-    if request.tier.upper() not in _SELF_SERVICE_TIERS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid tier '{request.tier}'. Valid values: {sorted(_SELF_SERVICE_TIERS)}",
-        )
-
-    try:
-        tier = SubscriptionTier(request.tier.upper())
-    except ValueError:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid tier '{request.tier}'. Valid values: {sorted(_SELF_SERVICE_TIERS)}",
-        )
+    # Pydantic validates tier is one of FREE/PRO/BUSINESS via Literal type.
+    tier = SubscriptionTier(request.tier)
 
     # Downgrade to FREE or beta users (payment not enabled) → update tier directly.
     payment_enabled = await is_feature_enabled(

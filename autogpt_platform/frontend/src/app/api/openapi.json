@@ -13718,7 +13718,11 @@
       },
       "SubscriptionTierRequest": {
         "properties": {
-          "tier": { "type": "string", "title": "Tier" },
+          "tier": {
+            "type": "string",
+            "enum": ["FREE", "PRO", "BUSINESS"],
+            "title": "Tier"
+          },
           "success_url": {
             "type": "string",
             "title": "Success Url",

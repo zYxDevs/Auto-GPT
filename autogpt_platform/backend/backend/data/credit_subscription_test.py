@@ -53,6 +53,14 @@ async def test_sync_subscription_from_stripe_active():
         "status": "active",
         "items": {"data": [{"price": {"id": "price_pro_monthly"}}]},
     }
+
+    async def mock_price_id(tier: SubscriptionTier) -> str | None:
+        if tier == SubscriptionTier.PRO:
+            return "price_pro_monthly"
+        if tier == SubscriptionTier.BUSINESS:
+            return "price_biz_monthly"
+        return None
+
     with (
         patch(
             "backend.data.credit.User.prisma",
@@ -60,13 +68,7 @@ async def test_sync_subscription_from_stripe_active():
         ),
         patch(
             "backend.data.credit.get_subscription_price_id",
-            side_effect=lambda tier: AsyncMock(
-                return_value=(
-                    "price_pro_monthly"
-                    if tier == SubscriptionTier.PRO
-                    else "price_biz_monthly"
-                )
-            )(),
+            side_effect=mock_price_id,
         ),
         patch(
             "backend.data.credit.set_subscription_tier", new_callable=AsyncMock
