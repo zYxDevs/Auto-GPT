@@ -836,6 +836,11 @@ async def llm_call(
     elif provider == "anthropic":
 
         an_tools = convert_openai_tool_fmt_to_anthropic(tools)
+        # Cache tool definitions alongside the system prompt.
+        # Placing cache_control on the last tool caches all tool schemas as a
+        # single prefix — reads cost 10% of normal input tokens.
+        if isinstance(an_tools, list) and an_tools:
+            an_tools[-1] = {**an_tools[-1], "cache_control": {"type": "ephemeral"}}
 
         system_messages = [p["content"] for p in prompt if p["role"] == "system"]
         sysprompt = " ".join(system_messages)
@@ -861,7 +866,13 @@ async def llm_call(
         try:
             resp = await client.messages.create(
                 model=llm_model.value,
-                system=sysprompt,
+                system=[
+                    {
+                        "type": "text",
+                        "text": sysprompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
                 messages=messages,
                 max_tokens=max_tokens,
                 tools=an_tools,

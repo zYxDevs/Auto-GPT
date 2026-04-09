@@ -32,6 +32,7 @@ from pydantic import BaseModel
 
 from backend.copilot.context import get_workspace_manager
 from backend.data.redis_client import get_redis_async
+from backend.data.understanding import format_understanding_for_prompt
 from backend.executor.cluster_lock import AsyncClusterLock
 from backend.util.exceptions import NotFoundError
 from backend.util.settings import Settings
@@ -66,7 +67,7 @@ from ..response_model import (
     StreamUsage,
 )
 from ..service import (
-    _build_system_prompt,
+    _build_cacheable_system_prompt,
     _generate_session_title,
     _is_langfuse_configured,
 )
@@ -1556,9 +1557,9 @@ async def stream_chat_completion_sdk(
                 )
                 return None
 
-        e2b_sandbox, (base_system_prompt, _), dl = await asyncio.gather(
+        e2b_sandbox, (base_system_prompt, understanding), dl = await asyncio.gather(
             _setup_e2b(),
-            _build_system_prompt(user_id, has_conversation_history=has_history),
+            _build_cacheable_system_prompt(user_id),
             _fetch_transcript(),
         )
 
@@ -1700,6 +1701,14 @@ async def stream_chat_completion_sdk(
             transcript_msg_count,
             session_id,
         )
+        # On the first turn inject user context into the message instead of the
+        # system prompt — the system prompt is now static (same for all users)
+        # so the LLM can cache it across sessions.
+        if not has_history and understanding:
+            user_ctx = format_understanding_for_prompt(understanding)
+            query_message = (
+                f"<user_context>\n{user_ctx}\n</user_context>\n\n{query_message}"
+            )
         # If files are attached, prepare them: images become vision
         # content blocks in the user message, other files go to sdk_cwd.
         attachments = await _prepare_file_attachments(

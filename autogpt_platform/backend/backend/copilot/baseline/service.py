@@ -39,7 +39,7 @@ from backend.copilot.response_model import (
     StreamUsage,
 )
 from backend.copilot.service import (
-    _build_system_prompt,
+    _build_cacheable_system_prompt,
     _generate_session_title,
     _get_openai_client,
     config,
@@ -47,6 +47,7 @@ from backend.copilot.service import (
 from backend.copilot.token_tracking import persist_and_record_usage
 from backend.copilot.tools import execute_tool, get_available_tools
 from backend.copilot.tracking import track_user_message
+from backend.data.understanding import format_understanding_for_prompt
 from backend.util.exceptions import NotFoundError
 from backend.util.prompt import compress_context
 
@@ -175,17 +176,13 @@ async def stream_chat_completion_baseline(
 
     message_id = str(uuid.uuid4())
 
-    # Build system prompt only on the first turn to avoid mid-conversation
-    # changes from concurrent chats updating business understanding.
+    # Build a fully static system prompt for token caching.
+    # User-specific context is injected into the first user message instead
+    # so the system prompt stays identical across all users and sessions.
     is_first_turn = len(session.messages) <= 1
-    if is_first_turn:
-        base_system_prompt, _ = await _build_system_prompt(
-            user_id, has_conversation_history=False
-        )
-    else:
-        base_system_prompt, _ = await _build_system_prompt(
-            user_id=None, has_conversation_history=True
-        )
+    base_system_prompt, understanding = await _build_cacheable_system_prompt(
+        user_id if is_first_turn else None
+    )
 
     # Append tool documentation and technical notes
     system_prompt = base_system_prompt + get_baseline_supplement()
@@ -200,6 +197,16 @@ async def stream_chat_completion_baseline(
     for msg in messages_for_context:
         if msg.role in ("user", "assistant") and msg.content:
             openai_messages.append({"role": msg.role, "content": msg.content})
+
+    # Inject user context into the first user message on first turn
+    if is_first_turn and understanding:
+        user_ctx = format_understanding_for_prompt(understanding)
+        for msg in openai_messages:
+            if msg["role"] == "user":
+                msg["content"] = (
+                    f"<user_context>\n{user_ctx}\n</user_context>\n\n{msg['content']}"
+                )
+                break
 
     tools = get_available_tools()
 
