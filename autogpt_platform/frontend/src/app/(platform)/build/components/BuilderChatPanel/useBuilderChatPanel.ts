@@ -102,11 +102,17 @@ export function useBuilderChatPanel({
   const processedToolCallsRef = useRef(new Set<string>());
   // Guards against sending the seed message more than once per session.
   const hasSentSeedMessageRef = useRef(false);
+  // Tracks the current flowID as a ref so in-flight session creation callbacks
+  // can verify the graph hasn't changed before committing the new sessionId.
+  const currentFlowIDRef = useRef<string | null>(null);
 
   const [{ flowID }, setQueryStates] = useQueryStates({
     flowID: parseAsString,
     flowExecutionID: parseAsString,
   });
+  // Keep ref in sync with the current flowID so in-flight session callbacks can
+  // detect stale graph context without closure staleness issues.
+  currentFlowIDRef.current = flowID;
   const { toast } = useToast();
 
   const nodes = useNodeStore(
@@ -145,6 +151,10 @@ export function useBuilderChatPanel({
     // or the effect re-runs, avoiding stale state from async calls.
     let cancelled = false;
     isCreatingSessionRef.current = true;
+    // Snapshot the flowID at effect start so the result is rejected if the
+    // user navigates to a different graph before the request completes, preventing
+    // the old session from being assigned to the new graph.
+    const effectFlowID = flowID;
 
     async function createSession() {
       setIsCreatingSession(true);
@@ -153,7 +163,9 @@ export function useBuilderChatPanel({
         // session before allowing any messages — session IDs alone are not
         // sufficient for unauthorized access.
         const res = await postV2CreateSession(null);
-        if (cancelled) return;
+        // Discard the result if the effect was cancelled (unmount or re-run) or
+        // if the user navigated to a different graph before the request completed.
+        if (cancelled || currentFlowIDRef.current !== effectFlowID) return;
         if (res.status === 200) {
           const id = res.data.id;
           // Validate the session ID is a safe non-empty identifier before
@@ -165,7 +177,7 @@ export function useBuilderChatPanel({
           }
           setSessionId(id);
           // Cache so this session is reused next time the same graph is opened.
-          if (flowID) graphSessionCache.set(flowID, id);
+          if (effectFlowID) graphSessionCache.set(effectFlowID, id);
         } else {
           setSessionError(true);
         }
