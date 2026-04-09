@@ -63,7 +63,7 @@ function ProviderTable({ data, rateOverrides, onRateOverride }: Props) {
             const currentRate = rateOverrides[key] ?? fallback;
             return (
               <tr
-                key={`${row.provider}:${row.tracking_type}:${row.model ?? ""}`}
+                key={`${row.provider}:${tt}:${row.model ?? ""}`}
                 className="border-b hover:bg-muted"
               >
                 <td className="px-4 py-3 font-medium">{row.provider}</td>
