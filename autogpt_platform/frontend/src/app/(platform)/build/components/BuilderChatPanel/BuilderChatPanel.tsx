@@ -23,10 +23,10 @@ import { useBuilderChatPanel } from "./useBuilderChatPanel";
 
 interface Props {
   className?: string;
-  isGraphLoaded?: boolean;
+  onGraphEdited?: () => void;
 }
 
-export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
+export function BuilderChatPanel({ className, onGraphEdited }: Props) {
   const {
     isOpen,
     handleToggle,
@@ -42,14 +42,13 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
     handleApplyAction,
     undoStack,
     handleUndoLastAction,
-    seedMessageId,
     inputValue,
     setInputValue,
     handleSend,
     handleKeyDown,
     isStreaming,
     canSend,
-  } = useBuilderChatPanel({ isGraphLoaded });
+  } = useBuilderChatPanel({ onGraphEdited });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -94,7 +93,6 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
             appliedActionKeys={appliedActionKeys}
             onApplyAction={handleApplyAction}
             onRetry={retrySession}
-            seedMessageId={seedMessageId}
             messagesEndRef={messagesEndRef}
             isStreaming={isStreaming}
           />
@@ -176,7 +174,6 @@ interface MessageListProps {
   appliedActionKeys: Set<string>;
   onApplyAction: (action: GraphAction) => void;
   onRetry: () => void;
-  seedMessageId: string | null;
   messagesEndRef: React.RefObject<HTMLDivElement>;
   isStreaming: boolean;
 }
@@ -191,13 +188,11 @@ function MessageList({
   appliedActionKeys,
   onApplyAction,
   onRetry,
-  seedMessageId,
   messagesEndRef,
   isStreaming,
 }: MessageListProps) {
-  const visibleMessages = messages.filter(
-    (msg) =>
-      msg.id !== seedMessageId && Boolean(extractTextFromParts(msg.parts)),
+  const visibleMessages = messages.filter((msg) =>
+    Boolean(extractTextFromParts(msg.parts)),
   );
   const lastVisibleRole = visibleMessages.at(-1)?.role;
   const showTypingIndicator =
@@ -235,34 +230,16 @@ function MessageList({
         </div>
       )}
 
-      {visibleMessages.length === 0 &&
-        !isCreatingSession &&
-        !sessionError &&
-        !messages.some((m) => m.id === seedMessageId) && (
-          <div className="flex flex-col items-center gap-2 py-6 text-center text-xs text-slate-400">
-            <ChatCircle
-              size={28}
-              weight="duotone"
-              className="text-violet-300"
-            />
-            <p>Ask me to explain or modify your agent.</p>
-            <p className="text-slate-300">
-              You can say things like &ldquo;What does this agent do?&rdquo; or
-              &ldquo;Add a step that formats the output.&rdquo;
-            </p>
-          </div>
-        )}
-
-      {visibleMessages.length === 0 &&
-        messages.some((m) => m.id === seedMessageId) && (
-          <div className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2 text-xs text-violet-600">
-            <p className="font-medium">Graph context sent</p>
-            <p className="mt-0.5 text-violet-500">
-              I&apos;ve analysed your agent. Ask me anything about it or tell me
-              what to change.
-            </p>
-          </div>
-        )}
+      {visibleMessages.length === 0 && !isCreatingSession && !sessionError && (
+        <div className="flex flex-col items-center gap-2 py-6 text-center text-xs text-slate-400">
+          <ChatCircle size={28} weight="duotone" className="text-violet-300" />
+          <p>Ask me to explain or modify your agent.</p>
+          <p className="text-slate-300">
+            You can say things like &ldquo;What does this agent do?&rdquo; or
+            &ldquo;Add a step that formats the output.&rdquo;
+          </p>
+        </div>
+      )}
 
       {visibleMessages.map((msg) => {
         const textParts = extractTextFromParts(msg.parts);

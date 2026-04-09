@@ -34,7 +34,7 @@ export const Flow = () => {
     flowExecutionID: parseAsString,
   });
 
-  const { data: graph } = useGetV1GetSpecificGraph(
+  const { data: graph, refetch: refetchGraph } = useGetV1GetSpecificGraph(
     flowID ?? "",
     {},
     {
@@ -139,7 +139,7 @@ export const Flow = () => {
         graphId={flowID || undefined}
       />
       {isBuilderChatEnabled && (
-        <BuilderChatPanel isGraphLoaded={isInitialLoadComplete} />
+        <BuilderChatPanel onGraphEdited={() => void refetchGraph()} />
       )}
     </div>
   );

@@ -93,7 +93,10 @@ vi.mock("nuqs", () => ({
 }));
 
 // Import after mocks
-import { useBuilderChatPanel } from "../useBuilderChatPanel";
+import {
+  useBuilderChatPanel,
+  clearGraphSessionCacheForTesting,
+} from "../useBuilderChatPanel";
 
 beforeEach(() => {
   mockFlowID = null;
@@ -108,6 +111,7 @@ beforeEach(() => {
   mockSendMessage.mockClear();
   mockSetMessages.mockClear();
   mockToast.mockClear();
+  clearGraphSessionCacheForTesting();
 });
 
 afterEach(() => {
@@ -203,33 +207,15 @@ describe("useBuilderChatPanel – session lifecycle", () => {
   });
 });
 
-describe("useBuilderChatPanel – seed message", () => {
-  it("sends seed message via sendMessage when session becomes available and isGraphLoaded=true", async () => {
+describe("useBuilderChatPanel – no auto-send on open", () => {
+  it("does NOT auto-send any message when the panel opens", async () => {
     mockPostV2CreateSession.mockResolvedValue({
       status: 200,
-      data: { id: "sess-seed" },
+      data: { id: "sess-open" },
     });
     mockNodes.push({
       id: "n1",
       data: { title: "Search Block", description: "" },
-    });
-
-    const { result } = renderHook(() =>
-      useBuilderChatPanel({ isGraphLoaded: true }),
-    );
-
-    await openAndFlush(() => result.current.handleToggle());
-
-    expect(mockSendMessage).toHaveBeenCalledOnce();
-    const callArg = mockSendMessage.mock.calls[0][0] as { text: string };
-    expect(callArg.text).toContain("I'm building an agent");
-    expect(callArg.text).toContain("graph_context");
-  });
-
-  it("does NOT send seed message when isGraphLoaded is false (default)", async () => {
-    mockPostV2CreateSession.mockResolvedValue({
-      status: 200,
-      data: { id: "sess-no-seed" },
     });
 
     const { result } = renderHook(() => useBuilderChatPanel());
@@ -237,25 +223,6 @@ describe("useBuilderChatPanel – seed message", () => {
     await openAndFlush(() => result.current.handleToggle());
 
     expect(mockSendMessage).not.toHaveBeenCalled();
-  });
-
-  it("sends seed message only once even when deps re-run (hasSentSeedMessageRef guard)", async () => {
-    mockPostV2CreateSession.mockResolvedValue({
-      status: 200,
-      data: { id: "sess-once" },
-    });
-
-    const { result, rerender } = renderHook(() =>
-      useBuilderChatPanel({ isGraphLoaded: true }),
-    );
-
-    await openAndFlush(() => result.current.handleToggle());
-    expect(mockSendMessage).toHaveBeenCalledOnce();
-
-    // Re-render (simulating store update) should not send a second seed
-    act(() => rerender());
-
-    expect(mockSendMessage).toHaveBeenCalledOnce();
   });
 });
 

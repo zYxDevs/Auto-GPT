@@ -45,7 +45,6 @@ function makeMockHook(
     handleApplyAction: vi.fn(),
     undoStack: [],
     handleUndoLastAction: vi.fn(),
-    seedMessageId: null,
     inputValue: "",
     setInputValue: vi.fn(),
     handleSend: vi.fn(),
@@ -128,43 +127,6 @@ describe("BuilderChatPanel", () => {
     render(<BuilderChatPanel />);
     expect(screen.getByText("What does this agent do?")).toBeDefined();
     expect(screen.getByText("This agent searches the web.")).toBeDefined();
-  });
-
-  it("hides the seed message from the chat UI", () => {
-    mockUseBuilderChatPanel.mockReturnValue(
-      makeMockHook({
-        isOpen: true,
-        seedMessageId: "seed-1",
-        messages: [
-          {
-            id: "seed-1",
-            role: "user",
-            parts: [{ type: "text", text: "I'm building an agent..." }],
-          },
-        ] as ReturnType<typeof useBuilderChatPanel>["messages"],
-      }),
-    );
-    render(<BuilderChatPanel />);
-    // The seed message should NOT be visible in the chat list
-    expect(screen.queryByText("I'm building an agent...")).toBeNull();
-  });
-
-  it("shows graph context banner when seed has been sent but no visible messages", () => {
-    mockUseBuilderChatPanel.mockReturnValue(
-      makeMockHook({
-        isOpen: true,
-        seedMessageId: "seed-1",
-        messages: [
-          {
-            id: "seed-1",
-            role: "user",
-            parts: [{ type: "text", text: "I'm building an agent..." }],
-          },
-        ] as ReturnType<typeof useBuilderChatPanel>["messages"],
-      }),
-    );
-    render(<BuilderChatPanel />);
-    expect(screen.getByText("Graph context sent")).toBeDefined();
   });
 
   it("renders suggested changes section when parsedActions are present", () => {
@@ -379,11 +341,10 @@ describe("BuilderChatPanel", () => {
     expect(screen.queryByLabelText("Undo last applied change")).toBeNull();
   });
 
-  it("passes isGraphLoaded to useBuilderChatPanel", () => {
-    render(<BuilderChatPanel isGraphLoaded={true} />);
-    expect(mockUseBuilderChatPanel).toHaveBeenCalledWith({
-      isGraphLoaded: true,
-    });
+  it("passes onGraphEdited to useBuilderChatPanel", () => {
+    const onGraphEdited = vi.fn();
+    render(<BuilderChatPanel onGraphEdited={onGraphEdited} />);
+    expect(mockUseBuilderChatPanel).toHaveBeenCalledWith({ onGraphEdited });
   });
 });
 
