@@ -14,6 +14,7 @@ from .platform_cost import (
     _mask_email,
     get_platform_cost_dashboard,
     get_platform_cost_logs,
+    get_platform_cost_logs_for_export,
     log_platform_cost,
     log_platform_cost_safe,
 )
@@ -93,6 +94,51 @@ class TestBuildWhere:
         end = datetime(2026, 6, 1, tzinfo=timezone.utc)
         sql, _ = _build_where(start, end, None, None)
         assert " AND " in sql
+
+    def test_model_only(self):
+        sql, params = _build_where(None, None, None, None, model="gpt-4")
+        assert '"model" = $1' in sql
+        assert params == ["gpt-4"]
+
+    def test_block_name_only(self):
+        sql, params = _build_where(None, None, None, None, block_name="LLMBlock")
+        assert 'LOWER("blockName") = LOWER($1)' in sql
+        assert params == ["LLMBlock"]
+
+    def test_tracking_type_only(self):
+        sql, params = _build_where(None, None, None, None, tracking_type="tokens")
+        assert '"trackingType" = $1' in sql
+        assert params == ["tokens"]
+
+    def test_all_new_filters_combined(self):
+        sql, params = _build_where(
+            None,
+            None,
+            None,
+            None,
+            model="gpt-4",
+            block_name="LLM",
+            tracking_type="tokens",
+        )
+        assert len(params) == 3
+        assert params[0] == "gpt-4"
+        assert params[1] == "LLM"
+        assert params[2] == "tokens"
+
+    def test_new_filters_with_alias(self):
+        sql, params = _build_where(
+            None,
+            None,
+            None,
+            None,
+            table_alias="p",
+            model="gpt-4",
+            block_name="MyBlock",
+            tracking_type="cost_usd",
+        )
+        assert 'p."model" = $1' in sql
+        assert 'LOWER(p."blockName") = LOWER($2)' in sql
+        assert 'p."trackingType" = $3' in sql
 
 
 def _make_entry(**overrides: object) -> PlatformCostEntry:
@@ -288,3 +334,78 @@ class TestGetPlatformCostLogs:
         with patch("backend.data.platform_cost.query_raw_with_schema", new=mock_query):
             logs, total = await get_platform_cost_logs()
         assert total == 0
+
+
+def _make_log_row(i: int = 0) -> dict:
+    return {
+        "id": f"log-{i}",
+        "created_at": datetime(2026, 3, 1, tzinfo=timezone.utc),
+        "user_id": "u1",
+        "email": None,
+        "graph_exec_id": None,
+        "node_exec_id": None,
+        "block_name": "TestBlock",
+        "provider": "openai",
+        "tracking_type": "tokens",
+        "cost_microdollars": 1000,
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "duration": 0.5,
+        "model": "gpt-4",
+        "cache_read_tokens": None,
+        "cache_creation_tokens": None,
+    }
+
+
+class TestGetPlatformCostLogsForExport:
+    @pytest.mark.asyncio
+    async def test_returns_logs_not_truncated(self):
+        rows = [_make_log_row(0)]
+        mock_query = AsyncMock(return_value=rows)
+        with patch("backend.data.platform_cost.query_raw_with_schema", new=mock_query):
+            logs, truncated = await get_platform_cost_logs_for_export()
+        assert len(logs) == 1
+        assert truncated is False
+        assert logs[0].id == "log-0"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_not_truncated(self):
+        mock_query = AsyncMock(return_value=[])
+        with patch("backend.data.platform_cost.query_raw_with_schema", new=mock_query):
+            logs, truncated = await get_platform_cost_logs_for_export()
+        assert logs == []
+        assert truncated is False
+
+    @pytest.mark.asyncio
+    async def test_truncates_at_export_max_rows(self):
+        rows = [_make_log_row(i) for i in range(3)]
+        mock_query = AsyncMock(return_value=rows)
+        with patch(
+            "backend.data.platform_cost.query_raw_with_schema", new=mock_query
+        ), patch("backend.data.platform_cost.EXPORT_MAX_ROWS", 2):
+            logs, truncated = await get_platform_cost_logs_for_export()
+        assert len(logs) == 2
+        assert truncated is True
+
+    @pytest.mark.asyncio
+    async def test_passes_model_block_tracking_filters(self):
+        mock_query = AsyncMock(return_value=[])
+        with patch("backend.data.platform_cost.query_raw_with_schema", new=mock_query):
+            await get_platform_cost_logs_for_export(
+                model="gpt-4", block_name="LLMBlock", tracking_type="tokens"
+            )
+        call_args = mock_query.call_args[0]
+        assert "gpt-4" in call_args
+        assert "LLMBlock" in call_args
+        assert "tokens" in call_args
+
+    @pytest.mark.asyncio
+    async def test_maps_cache_tokens(self):
+        row = _make_log_row(0)
+        row["cache_read_tokens"] = 50
+        row["cache_creation_tokens"] = 25
+        mock_query = AsyncMock(return_value=[row])
+        with patch("backend.data.platform_cost.query_raw_with_schema", new=mock_query):
+            logs, _ = await get_platform_cost_logs_for_export()
+        assert logs[0].cache_read_tokens == 50
+        assert logs[0].cache_creation_tokens == 25
