@@ -275,7 +275,7 @@ function MessageList({
             )}
           >
             {msg.role === "assistant"
-              ? msg.parts.map((part, i) => {
+              ? (msg.parts ?? []).map((part, i) => {
                   // Normalize dynamic-tool parts → tool-{name} so MessagePartRenderer
                   // can route them: edit_agent/run_agent get their specific renderers,
                   // everything else falls through to GenericTool (collapsed accordion).
