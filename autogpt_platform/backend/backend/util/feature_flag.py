@@ -43,10 +43,9 @@ class Flag(str, Enum):
     COPILOT_SDK = "copilot-sdk"
     COPILOT_DAILY_TOKEN_LIMIT = "copilot-daily-token-limit"
     COPILOT_WEEKLY_TOKEN_LIMIT = "copilot-weekly-token-limit"
-    SUBSCRIPTION_COST_PRO = "subscription-cost-pro"
-    SUBSCRIPTION_COST_BUSINESS = "subscription-cost-business"
     STRIPE_PRICE_PRO = "stripe-price-id-pro"
     STRIPE_PRICE_BUSINESS = "stripe-price-id-business"
+    GRAPHITI_MEMORY = "graphiti-memory"
 
 
 def is_configured() -> bool:

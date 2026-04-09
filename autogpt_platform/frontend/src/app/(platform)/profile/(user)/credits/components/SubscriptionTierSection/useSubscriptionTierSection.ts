@@ -1,71 +1,59 @@
-import AutoGPTServerAPI from "@/lib/autogpt-server-api";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useGetSubscriptionStatus,
+  useUpdateSubscriptionTier,
+} from "@/app/api/__generated__/endpoints/credits/credits";
+import type { SubscriptionStatusResponse } from "@/app/api/__generated__/models/subscriptionStatusResponse";
+import type { SubscriptionTierRequestTier } from "@/app/api/__generated__/models/subscriptionTierRequestTier";
+import { useCallback } from "react";
 
-export type SubscriptionStatus = {
-  tier: string;
-  monthly_cost: number;
-  tier_costs: Record<string, number>;
-};
+export type SubscriptionStatus = SubscriptionStatusResponse;
 
 export function useSubscriptionTierSection() {
-  const api = useMemo(() => new AutoGPTServerAPI(), []);
+  const {
+    data: subscription,
+    isLoading,
+    error: queryError,
+    refetch,
+  } = useGetSubscriptionStatus({
+    query: { select: (data) => (data.status === 200 ? data.data : null) },
+  });
 
-  const [subscription, setSubscription] = useState<SubscriptionStatus | null>(
-    null,
-  );
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, setIsPending] = useState(false);
+  const error = queryError ? "Failed to load subscription info" : null;
 
-  const fetchSubscription = useCallback(async () => {
-    try {
-      const sub = await api.getSubscription();
-      setSubscription(sub);
-    } catch (e) {
-      setError("Failed to load subscription info");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [api]);
-
-  useEffect(() => {
-    fetchSubscription();
-  }, [fetchSubscription]);
+  const { mutateAsync: doUpdateTier, isPending } = useUpdateSubscriptionTier();
 
   const changeTier = useCallback(
     async (tier: string): Promise<string | null> => {
-      setIsPending(true);
       try {
         const successUrl = `${window.location.origin}${window.location.pathname}?subscription=success`;
         const cancelUrl = `${window.location.origin}${window.location.pathname}?subscription=cancelled`;
-        const result = await api.setSubscriptionTier(
-          tier,
-          successUrl,
-          cancelUrl,
-        );
-        if (result.url) {
-          window.location.href = result.url;
+        const result = await doUpdateTier({
+          data: {
+            tier: tier as SubscriptionTierRequestTier,
+            success_url: successUrl,
+            cancel_url: cancelUrl,
+          },
+        });
+        if (result.status === 200 && result.data.url) {
+          window.location.href = result.data.url;
           return null;
         }
-        await fetchSubscription();
+        await refetch();
         return null;
       } catch (e: unknown) {
         const msg =
           e instanceof Error ? e.message : "Failed to change subscription tier";
         return msg;
-      } finally {
-        setIsPending(false);
       }
     },
-    [api, fetchSubscription],
+    [doUpdateTier, refetch],
   );
 
   return {
-    subscription,
+    subscription: subscription ?? null,
     isLoading,
     error,
     isPending,
     changeTier,
-    refetch: fetchSubscription,
   };
 }

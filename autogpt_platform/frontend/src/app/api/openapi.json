@@ -8585,9 +8585,8 @@
           },
           "success": { "type": "boolean", "title": "Success", "default": true },
           "is_dry_run": {
-            "type": "boolean",
-            "title": "Is Dry Run",
-            "default": false
+            "anyOf": [{ "type": "boolean" }, { "type": "null" }],
+            "title": "Is Dry Run"
           }
         },
         "type": "object",
@@ -12612,7 +12611,9 @@
           "bash_exec",
           "web_fetch",
           "feature_request_search",
-          "feature_request_created"
+          "feature_request_created",
+          "memory_store",
+          "memory_search"
         ],
         "title": "ResponseType",
         "description": "Types of tool responses."

@@ -1145,12 +1145,7 @@ class BetaUserCredit(UserCredit):
         if (snapshot_time.year, snapshot_time.month) == (cur_time.year, cur_time.month):
             return balance
 
-        # Include subscription cost in grant so the upcoming subscription deduction
-        # does not reduce the user's effective usage credits below num_user_credits_refill.
-        user = await get_user_by_id(user_id)
-        tier = user.subscription_tier or SubscriptionTier.FREE
-        sub_cost = await get_subscription_cost(user_id, tier)
-        target = self.num_user_credits_refill + sub_cost
+        target = self.num_user_credits_refill
 
         try:
             balance, _ = await self._add_transaction(
@@ -1277,20 +1272,6 @@ async def get_auto_top_up(user_id: str) -> AutoTopUpConfig:
         return AutoTopUpConfig(threshold=0, amount=0)
 
     return AutoTopUpConfig.model_validate(user.top_up_config)
-
-
-async def get_subscription_cost(user_id: str, tier: SubscriptionTier) -> int:
-    """Return monthly subscription cost in credits from LD. 0 = free or disabled."""
-    flag_map = {
-        SubscriptionTier.PRO: Flag.SUBSCRIPTION_COST_PRO,
-        SubscriptionTier.BUSINESS: Flag.SUBSCRIPTION_COST_BUSINESS,
-    }
-    flag = flag_map.get(tier)
-    if flag is None:
-        return 0
-
-    cost = await get_feature_flag_value(flag.value, user_id, default=0)
-    return max(0, int(cost)) if isinstance(cost, (int, float)) else 0
 
 
 async def get_subscription_price_id(tier: SubscriptionTier) -> str | None:

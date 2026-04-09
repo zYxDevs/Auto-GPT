@@ -27,6 +27,7 @@ from opentelemetry import trace as otel_trace
 
 from backend.copilot.config import CopilotMode
 from backend.copilot.context import get_workspace_manager, set_execution_context
+from backend.copilot.graphiti.config import is_enabled_for_user
 from backend.copilot.model import (
     ChatMessage,
     ChatSession,
@@ -34,7 +35,7 @@ from backend.copilot.model import (
     maybe_append_user_message,
     upsert_chat_session,
 )
-from backend.copilot.prompting import get_baseline_supplement
+from backend.copilot.prompting import get_baseline_supplement, get_graphiti_supplement
 from backend.copilot.response_model import (
     StreamBaseResponse,
     StreamError,
@@ -1001,8 +1002,19 @@ async def stream_chat_completion_baseline(
 
     message_id = str(uuid.uuid4())
 
-    # Append tool documentation and technical notes
-    system_prompt = base_system_prompt + get_baseline_supplement()
+    # Append tool documentation, technical notes, and Graphiti memory instructions
+    graphiti_enabled = await is_enabled_for_user(user_id)
+
+    graphiti_supplement = get_graphiti_supplement() if graphiti_enabled else ""
+    system_prompt = base_system_prompt + get_baseline_supplement() + graphiti_supplement
+
+    # Warm context: pre-load relevant facts from Graphiti on first turn
+    if graphiti_enabled and user_id and len(session.messages) <= 1:
+        from backend.copilot.graphiti.context import fetch_warm_context
+
+        warm_ctx = await fetch_warm_context(user_id, message or "")
+        if warm_ctx:
+            system_prompt += f"\n\n{warm_ctx}"
 
     # Compress context if approaching the model's token limit
     messages_for_context = await _compress_session_messages(
@@ -1271,6 +1283,16 @@ async def stream_chat_completion_baseline(
             await upsert_chat_session(session)
         except Exception as persist_err:
             logger.error("[Baseline] Failed to persist session: %s", persist_err)
+
+        # --- Graphiti: ingest conversation turn for temporal memory ---
+        if graphiti_enabled and user_id and message and is_user_message:
+            from backend.copilot.graphiti.ingest import enqueue_conversation_turn
+
+            _ingest_task = asyncio.create_task(
+                enqueue_conversation_turn(user_id, session_id, message)
+            )
+            _background_tasks.add(_ingest_task)
+            _ingest_task.add_done_callback(_background_tasks.discard)
 
         # --- Upload transcript for next-turn continuity ---
         # Backfill partial assistant text that wasn't recorded by the

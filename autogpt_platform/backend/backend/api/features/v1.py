@@ -53,7 +53,6 @@ from backend.data.credit import (
     UserCredit,
     create_subscription_checkout,
     get_auto_top_up,
-    get_subscription_cost,
     get_user_credit_model,
     set_auto_top_up,
     set_subscription_tier,
@@ -715,15 +714,10 @@ async def get_subscription_status(
 ) -> SubscriptionStatusResponse:
     user = await get_user_by_id(user_id)
     tier = user.subscription_tier or SubscriptionTier.FREE
-    cost = await get_subscription_cost(user_id, tier)
-    pro_cost, biz_cost = await asyncio.gather(
-        get_subscription_cost(user_id, SubscriptionTier.PRO),
-        get_subscription_cost(user_id, SubscriptionTier.BUSINESS),
-    )
     return SubscriptionStatusResponse(
         tier=tier.value,
-        monthly_cost=cost,
-        tier_costs={"FREE": 0, "PRO": pro_cost, "BUSINESS": biz_cost, "ENTERPRISE": 0},
+        monthly_cost=0,
+        tier_costs={"FREE": 0, "PRO": 0, "BUSINESS": 0, "ENTERPRISE": 0},
     )
 
 
