@@ -11,6 +11,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { KeyboardEvent, useEffect, useRef } from "react";
+import { ToolUIPart } from "ai";
 import { MessagePartRenderer } from "@/app/(platform)/copilot/components/ChatMessagesContainer/components/MessagePartRenderer";
 import type { CustomNode } from "../FlowEditor/nodes/CustomNode/CustomNode";
 import {
@@ -198,8 +199,11 @@ function MessageList({
   messagesEndRef,
   isStreaming,
 }: MessageListProps) {
-  const visibleMessages = messages.filter((msg) =>
-    Boolean(extractTextFromParts(msg.parts)),
+  const visibleMessages = messages.filter(
+    (msg) =>
+      Boolean(extractTextFromParts(msg.parts)) ||
+      (msg.role === "assistant" &&
+        msg.parts?.some((p) => p.type === "dynamic-tool")),
   );
   const lastVisibleRole = visibleMessages.at(-1)?.role;
   const showTypingIndicator =
@@ -262,14 +266,26 @@ function MessageList({
             )}
           >
             {msg.role === "assistant"
-              ? msg.parts.map((part, i) => (
-                  <MessagePartRenderer
-                    key={`${msg.id}-${i}`}
-                    part={part}
-                    messageID={msg.id}
-                    partIndex={i}
-                  />
-                ))
+              ? msg.parts.map((part, i) => {
+                  // Normalize dynamic-tool parts → tool-{name} so MessagePartRenderer
+                  // can route them: edit_agent/run_agent get their specific renderers,
+                  // everything else falls through to GenericTool (collapsed accordion).
+                  const renderedPart =
+                    part.type === "dynamic-tool"
+                      ? ({
+                          ...part,
+                          type: `tool-${(part as { toolName: string }).toolName}`,
+                        } as ToolUIPart)
+                      : (part as ToolUIPart);
+                  return (
+                    <MessagePartRenderer
+                      key={`${msg.id}-${i}`}
+                      part={renderedPart}
+                      messageID={msg.id}
+                      partIndex={i}
+                    />
+                  );
+                })
               : textParts}
           </div>
         );
