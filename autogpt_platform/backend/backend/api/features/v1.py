@@ -700,12 +700,19 @@ async def update_subscription_tier(
 ) -> SubscriptionStatusResponse:
     from prisma.enums import SubscriptionTier
 
+    _SELF_SERVICE_TIERS = {"FREE", "PRO", "BUSINESS"}
+    if request.tier.upper() not in _SELF_SERVICE_TIERS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid tier '{request.tier}'. Valid values: {sorted(_SELF_SERVICE_TIERS)}",
+        )
+
     try:
         tier = SubscriptionTier(request.tier.upper())
     except ValueError:
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid tier '{request.tier}'. Valid values: {[t.value for t in SubscriptionTier]}",
+            detail=f"Invalid tier '{request.tier}'. Valid values: {sorted(_SELF_SERVICE_TIERS)}",
         )
 
     try:

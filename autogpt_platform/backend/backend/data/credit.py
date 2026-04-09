@@ -605,7 +605,10 @@ class UserCredit(UserCreditBase):
         if cost == 0:
             return 0
 
-        await ensure_subscription_paid(user_id)
+        try:
+            await ensure_subscription_paid(user_id)
+        except Exception as e:
+            logger.warning(f"Subscription check failed for {user_id}: {e}")
 
         balance, _ = await self._add_transaction(
             user_id=user_id,
@@ -1269,6 +1272,7 @@ async def set_auto_top_up(user_id: str, config: AutoTopUpConfig):
         where={"id": user_id},
         data={"topUpConfig": SafeJson(config.model_dump())},
     )
+    get_user_by_id.cache_delete(user_id)  # type: ignore[attr-defined]
 
 
 async def set_subscription_tier(user_id: str, tier: SubscriptionTier) -> None:
