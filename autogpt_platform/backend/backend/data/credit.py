@@ -1,7 +1,7 @@
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from datetime import UTC, datetime, timezone
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 import stripe
@@ -604,11 +604,6 @@ class UserCredit(UserCreditBase):
     ) -> int:
         if cost == 0:
             return 0
-
-        try:
-            await ensure_subscription_paid(user_id)
-        except Exception as e:
-            logger.warning(f"Subscription check failed for {user_id}: {e}")
 
         balance, _ = await self._add_transaction(
             user_id=user_id,
@@ -1259,15 +1254,6 @@ async def get_stripe_customer_id(user_id: str) -> str:
 
 
 async def set_auto_top_up(user_id: str, config: AutoTopUpConfig):
-    user = await get_user_by_id(user_id)
-    tier = user.subscription_tier or SubscriptionTier.FREE
-    sub_cost = await get_subscription_cost(user_id, tier)
-    if sub_cost > 0 and config.amount < sub_cost:
-        cost_fmt = f"${sub_cost / 100:.2f}/mo"
-        raise ValueError(
-            f"Auto top-up amount must be at least {cost_fmt} to maintain "
-            f"your {tier.value} subscription. Set amount >= {cost_fmt} or downgrade to Free."
-        )
     await User.prisma().update(
         where={"id": user_id},
         data={"topUpConfig": SafeJson(config.model_dump())},
@@ -1276,46 +1262,12 @@ async def set_auto_top_up(user_id: str, config: AutoTopUpConfig):
 
 
 async def set_subscription_tier(user_id: str, tier: SubscriptionTier) -> None:
-    """
-    Upgrade or downgrade a user's subscription tier.
-
-    Upgrade: validates auto top-up is configured with amount >= subscription cost,
-    sets the tier immediately, and charges the first month's subscription.
-    Downgrade: sets the new tier immediately (takes effect on next monthly cycle).
-    No proration — full month is charged on upgrade.
-    """
-    current_user = await get_user_by_id(user_id)
-    current_tier = current_user.subscription_tier or SubscriptionTier.FREE
-
-    sub_cost = await get_subscription_cost(user_id, tier)
-
-    if sub_cost > 0:
-        auto_top_up = await get_auto_top_up(user_id)
-        if auto_top_up.amount < sub_cost:
-            cost_fmt = f"${sub_cost / 100:.2f}/mo"
-            raise ValueError(
-                f"Auto top-up must be configured with amount >= {cost_fmt} "
-                f"before upgrading to {tier.value}. "
-                f"Current amount: ${auto_top_up.amount / 100:.2f}/mo."
-            )
-
+    """Set the user's subscription tier (used by webhook and admin flows)."""
     await User.prisma().update(
         where={"id": user_id},
         data={"subscriptionTier": tier},
     )
     get_user_by_id.cache_delete(user_id)  # type: ignore[attr-defined]
-
-    # Charge immediately on upgrade (full month, no proration).
-    # Downgrade resets cleanly on next monthly cycle.
-    tier_order = [
-        SubscriptionTier.FREE,
-        SubscriptionTier.PRO,
-        SubscriptionTier.BUSINESS,
-        SubscriptionTier.ENTERPRISE,
-    ]
-    is_upgrade = tier_order.index(tier) > tier_order.index(current_tier)
-    if is_upgrade and sub_cost > 0:
-        await ensure_subscription_paid(user_id)
 
 
 async def get_auto_top_up(user_id: str) -> AutoTopUpConfig:
@@ -1341,51 +1293,72 @@ async def get_subscription_cost(user_id: str, tier: SubscriptionTier) -> int:
     return int(cost) if isinstance(cost, (int, float)) else 0
 
 
-async def ensure_subscription_paid(user_id: str) -> None:
-    """
-    Lazy monthly subscription deduction. Idempotent — safe to call from
-    spend_credits() and rate-limit checks. Triggers auto top-up when balance
-    drops below threshold after deduction.
+async def get_subscription_price_id(tier: SubscriptionTier) -> str | None:
+    """Return Stripe Price ID for a tier from LaunchDarkly. None = not configured."""
+    flag_map = {
+        SubscriptionTier.PRO: Flag.STRIPE_PRICE_PRO,
+        SubscriptionTier.BUSINESS: Flag.STRIPE_PRICE_BUSINESS,
+    }
+    flag = flag_map.get(tier)
+    if flag is None:
+        return None
+    price_id = await get_feature_flag_value(flag.value, user_id="", default="")
+    return price_id if isinstance(price_id, str) and price_id else None
 
-    On auto top-up failure: logs only (grace period). Does not downgrade tier.
-    """
-    user = await get_user_by_id(user_id)
-    tier = user.subscription_tier or SubscriptionTier.FREE
-    sub_cost = await get_subscription_cost(user_id, tier)
-    if sub_cost == 0:
-        return
 
-    cur_month = datetime.now(UTC).strftime("%Y-%m")
-    key = f"SUBSCRIPTION-{user_id}-{cur_month}"
+async def create_subscription_checkout(
+    user_id: str,
+    tier: SubscriptionTier,
+    success_url: str,
+    cancel_url: str,
+) -> str:
+    """Create a Stripe Checkout Session for a subscription. Returns the redirect URL."""
+    price_id = await get_subscription_price_id(tier)
+    if not price_id:
+        raise ValueError(f"Subscription not available for tier {tier.value}")
+    customer_id = await get_stripe_customer_id(user_id)
+    session = stripe.checkout.Session.create(
+        customer=customer_id,
+        mode="subscription",
+        line_items=[{"price": price_id, "quantity": 1}],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        subscription_data={"metadata": {"user_id": user_id, "tier": tier.value}},
+    )
+    return session.url or ""
 
-    credit = UserCredit()
-    try:
-        balance, _ = await credit._add_transaction(
-            user_id=user_id,
-            amount=-sub_cost,
-            transaction_type=CreditTransactionType.SUBSCRIPTION,
-            transaction_key=key,
-            fail_insufficient_credits=False,
-            metadata=SafeJson({"reason": f"Monthly {tier.value} subscription"}),
+
+async def sync_subscription_from_stripe(stripe_subscription: dict) -> None:
+    """Update User.subscriptionTier from a Stripe subscription object."""
+    customer_id = stripe_subscription["customer"]
+    user = await User.prisma().find_first(where={"stripeCustomerId": customer_id})
+    if not user:
+        logger.warning(
+            "sync_subscription_from_stripe: no user for customer %s", customer_id
         )
-    except UniqueViolationError:
-        return  # already paid this month
-
-    auto_top_up = await get_auto_top_up(user_id)
-    if auto_top_up.threshold and balance < auto_top_up.threshold:
-        try:
-            await credit._top_up_credits(
-                user_id=user_id,
-                amount=auto_top_up.amount,
-                key=f"AUTO-TOP-UP-SUB-{user_id}-{cur_month}",
-                ceiling_balance=auto_top_up.threshold,
-                top_up_type=TopUpType.AUTO,
+        return
+    status = stripe_subscription.get("status", "")
+    if status in ("active", "trialing"):
+        price_id = ""
+        items = stripe_subscription.get("items", {}).get("data", [])
+        if items:
+            price_id = items[0].get("price", {}).get("id", "")
+        pro_price = await get_subscription_price_id(SubscriptionTier.PRO)
+        biz_price = await get_subscription_price_id(SubscriptionTier.BUSINESS)
+        if price_id and price_id == pro_price:
+            tier = SubscriptionTier.PRO
+        elif price_id and price_id == biz_price:
+            tier = SubscriptionTier.BUSINESS
+        else:
+            logger.warning(
+                "sync_subscription_from_stripe: unknown price %s for customer %s",
+                price_id,
+                customer_id,
             )
-        except Exception as e:
-            logger.error(
-                f"Auto top-up failed during subscription deduction for {user_id}: {e}. "
-                f"Balance: {balance}, subscription cost: {sub_cost}."
-            )
+            return
+    else:
+        tier = SubscriptionTier.FREE
+    await set_subscription_tier(user.id, tier)
 
 
 async def admin_get_user_history(

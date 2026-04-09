@@ -50,11 +50,13 @@ from backend.data.credit import (
     RefundRequest,
     TransactionHistory,
     UserCredit,
+    create_subscription_checkout,
     get_auto_top_up,
     get_subscription_cost,
     get_user_credit_model,
     set_auto_top_up,
     set_subscription_tier,
+    sync_subscription_from_stripe,
 )
 from backend.data.graph import GraphSettings
 from backend.data.model import CredentialsMetaInput, UserOnboarding
@@ -65,11 +67,16 @@ from backend.data.onboarding import (
     UserOnboardingUpdate,
     complete_onboarding_step,
     complete_re_run_agent,
+    format_onboarding_for_extraction,
     get_recommended_agents,
     get_user_onboarding,
-    onboarding_enabled,
     reset_user_onboarding,
     update_user_onboarding,
+)
+from backend.data.tally import extract_business_understanding
+from backend.data.understanding import (
+    BusinessUnderstandingInput,
+    upsert_business_understanding,
 )
 from backend.data.user import (
     get_or_create_user,
@@ -284,35 +291,33 @@ async def get_onboarding_agents(
     return await get_recommended_agents(user_id)
 
 
-class OnboardingStatusResponse(pydantic.BaseModel):
-    """Response for onboarding status check."""
+class OnboardingProfileRequest(pydantic.BaseModel):
+    """Request body for onboarding profile submission."""
 
-    is_onboarding_enabled: bool
-    is_chat_enabled: bool
+    user_name: str = pydantic.Field(min_length=1, max_length=100)
+    user_role: str = pydantic.Field(min_length=1, max_length=100)
+    pain_points: list[str] = pydantic.Field(default_factory=list, max_length=20)
+
+
+class OnboardingStatusResponse(pydantic.BaseModel):
+    """Response for onboarding completion check."""
+
+    is_completed: bool
 
 
 @v1_router.get(
-    "/onboarding/enabled",
-    summary="Is onboarding enabled",
+    "/onboarding/completed",
+    summary="Check if onboarding is completed",
     tags=["onboarding", "public"],
     response_model=OnboardingStatusResponse,
+    dependencies=[Security(requires_user)],
 )
-async def is_onboarding_enabled(
+async def is_onboarding_completed(
     user_id: Annotated[str, Security(get_user_id)],
 ) -> OnboardingStatusResponse:
-    # Check if chat is enabled for user
-    is_chat_enabled = await is_feature_enabled(Flag.CHAT, user_id, False)
-
-    # If chat is enabled, skip legacy onboarding
-    if is_chat_enabled:
-        return OnboardingStatusResponse(
-            is_onboarding_enabled=False,
-            is_chat_enabled=True,
-        )
-
+    user_onboarding = await get_user_onboarding(user_id)
     return OnboardingStatusResponse(
-        is_onboarding_enabled=await onboarding_enabled(),
-        is_chat_enabled=False,
+        is_completed=OnboardingStep.VISIT_COPILOT in user_onboarding.completedSteps,
     )
 
 
@@ -325,6 +330,38 @@ async def is_onboarding_enabled(
 )
 async def reset_onboarding(user_id: Annotated[str, Security(get_user_id)]):
     return await reset_user_onboarding(user_id)
+
+
+@v1_router.post(
+    "/onboarding/profile",
+    summary="Submit onboarding profile",
+    tags=["onboarding"],
+    dependencies=[Security(requires_user)],
+)
+async def submit_onboarding_profile(
+    data: OnboardingProfileRequest,
+    user_id: Annotated[str, Security(get_user_id)],
+):
+    formatted = format_onboarding_for_extraction(
+        user_name=data.user_name,
+        user_role=data.user_role,
+        pain_points=data.pain_points,
+    )
+
+    try:
+        understanding_input = await extract_business_understanding(formatted)
+    except Exception:
+        understanding_input = BusinessUnderstandingInput.model_construct()
+
+    # Ensure the direct fields are set even if LLM missed them
+    understanding_input.user_name = data.user_name
+    understanding_input.user_role = data.user_role
+    if not understanding_input.pain_points:
+        understanding_input.pain_points = data.pain_points
+
+    await upsert_business_understanding(user_id, understanding_input)
+
+    return {"status": "ok"}
 
 
 ########################################################
@@ -651,6 +688,12 @@ async def get_user_auto_top_up(
 
 class SubscriptionTierRequest(BaseModel):
     tier: str
+    success_url: str = ""
+    cancel_url: str = ""
+
+
+class SubscriptionCheckoutResponse(BaseModel):
+    url: str
 
 
 class SubscriptionStatusResponse(BaseModel):
@@ -689,7 +732,7 @@ async def get_subscription_status(
 
 @v1_router.post(
     path="/credits/subscription",
-    summary="Upgrade or downgrade subscription tier",
+    summary="Start a Stripe Checkout session to upgrade subscription tier",
     operation_id="updateSubscriptionTier",
     tags=["credits"],
     dependencies=[Security(requires_user)],
@@ -697,8 +740,10 @@ async def get_subscription_status(
 async def update_subscription_tier(
     request: SubscriptionTierRequest,
     user_id: Annotated[str, Security(get_user_id)],
-) -> SubscriptionStatusResponse:
+) -> SubscriptionCheckoutResponse:
     from prisma.enums import SubscriptionTier
+
+    from backend.util.feature_flag import Flag, is_feature_enabled
 
     _SELF_SERVICE_TIERS = {"FREE", "PRO", "BUSINESS"}
     if request.tier.upper() not in _SELF_SERVICE_TIERS:
@@ -715,21 +760,26 @@ async def update_subscription_tier(
             detail=f"Invalid tier '{request.tier}'. Valid values: {sorted(_SELF_SERVICE_TIERS)}",
         )
 
-    try:
+    # Downgrade to FREE or beta users (payment not enabled) → update tier directly.
+    payment_enabled = await is_feature_enabled(
+        Flag.ENABLE_PLATFORM_PAYMENT, user_id, default=False
+    )
+    if tier == SubscriptionTier.FREE or not payment_enabled:
         await set_subscription_tier(user_id, tier)
+        return SubscriptionCheckoutResponse(url="")
+
+    # Paid upgrade → create Stripe Checkout Session.
+    try:
+        url = await create_subscription_checkout(
+            user_id=user_id,
+            tier=tier,
+            success_url=request.success_url,
+            cancel_url=request.cancel_url,
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    cost, pro_cost, biz_cost = await asyncio.gather(
-        get_subscription_cost(user_id, tier),
-        get_subscription_cost(user_id, SubscriptionTier.PRO),
-        get_subscription_cost(user_id, SubscriptionTier.BUSINESS),
-    )
-    return SubscriptionStatusResponse(
-        tier=tier.value,
-        monthly_cost=cost,
-        tier_costs={"FREE": 0, "PRO": pro_cost, "BUSINESS": biz_cost, "ENTERPRISE": 0},
-    )
+    return SubscriptionCheckoutResponse(url=url)
 
 
 @v1_router.post(
@@ -761,6 +811,12 @@ async def stripe_webhook(request: Request):
         or event["type"] == "checkout.session.async_payment_succeeded"
     ):
         await UserCredit().fulfill_checkout(session_id=event["data"]["object"]["id"])
+
+    if event["type"] in (
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+    ):
+        await sync_subscription_from_stripe(event["data"]["object"])
 
     if event["type"] == "charge.dispute.created":
         await UserCredit().handle_dispute(event["data"]["object"])
