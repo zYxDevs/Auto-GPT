@@ -958,7 +958,11 @@ async def stream_chat_completion_baseline(
     # Build system prompt only on the first turn to avoid mid-conversation
     # changes from concurrent chats updating business understanding.
     is_first_turn = len(session.messages) <= 1
-    if is_first_turn:
+    # Gate context fetch on both first turn AND user message so that assistant-
+    # role calls (e.g. tool-result submissions) on the first turn don't trigger
+    # a needless DB lookup for user understanding.
+    should_inject_user_context = is_first_turn and is_user_message
+    if should_inject_user_context:
         prompt_task = _build_cacheable_system_prompt(user_id)
     else:
         prompt_task = _build_cacheable_system_prompt(None)
@@ -1041,7 +1045,7 @@ async def stream_chat_completion_baseline(
     # Inject user context into the first user message on first turn.
     # Done before attachment/URL injection so the context prefix lands at
     # the very start of the message content.
-    if is_first_turn and understanding:
+    if should_inject_user_context and understanding:
         user_ctx = format_understanding_for_prompt(understanding)
         injected = False
         for msg in openai_messages:
