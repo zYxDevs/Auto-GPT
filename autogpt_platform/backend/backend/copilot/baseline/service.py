@@ -27,6 +27,7 @@ from opentelemetry import trace as otel_trace
 
 from backend.copilot.config import CopilotMode
 from backend.copilot.context import get_workspace_manager, set_execution_context
+from backend.copilot.db import update_message_content_by_sequence
 from backend.copilot.graphiti.config import is_enabled_for_user
 from backend.copilot.model import (
     ChatMessage,
@@ -1067,9 +1068,13 @@ async def stream_chat_completion_baseline(
         if prefixed is not None:
             # Persist the prefixed content so subsequent turns and --resume
             # retain the user context.
-            for session_msg in session.messages:
+            # The user message was already saved to DB before context injection
+            # (at ~line 932); update the DB record so the prefixed content
+            # survives page reload.
+            for idx, session_msg in enumerate(session.messages):
                 if session_msg.role == "user":
                     session_msg.content = prefixed
+                    await update_message_content_by_sequence(session_id, idx, prefixed)
                     break
             user_message_for_transcript = prefixed
         else:

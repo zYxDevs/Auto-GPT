@@ -62,6 +62,7 @@ from ..constants import (
     is_transient_api_error,
 )
 from ..context import encode_cwd_for_cli
+from ..db import update_message_content_by_sequence
 from ..graphiti.config import is_enabled_for_user
 from ..model import (
     ChatMessage,
@@ -2304,9 +2305,15 @@ async def stream_chat_completion_sdk(
             current_message = prefixed_message
             query_message = prefixed_message
             # Persist the prefixed content so resumed sessions retain the context.
-            for session_msg in session.messages:
+            # The user message was already saved to DB before context injection;
+            # update the DB record so the prefixed content survives page reload
+            # and --resume (the save at line ~1926 used the un-prefixed content).
+            for idx, session_msg in enumerate(session.messages):
                 if session_msg.role == "user":
                     session_msg.content = prefixed_message
+                    await update_message_content_by_sequence(
+                        session_id, idx, prefixed_message
+                    )
                     break
         # If files are attached, prepare them: images become vision
         # content blocks in the user message, other files go to sdk_cwd.
