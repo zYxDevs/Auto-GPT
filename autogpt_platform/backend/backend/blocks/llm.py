@@ -1602,6 +1602,10 @@ class AIStructuredResponseGeneratorBlock(AIBlockBase):
 
                 error_feedback_message = f"Error calling LLM: {e}"
 
+        # All retries exhausted or user-error break: persist accumulated cost so
+        # the executor can still charge/report the spend even on failure.
+        if total_provider_cost is not None:
+            self.merge_stats(NodeExecutionStats(provider_cost=total_provider_cost))
         raise RuntimeError(error_feedback_message)
 
     def response_format_instructions(

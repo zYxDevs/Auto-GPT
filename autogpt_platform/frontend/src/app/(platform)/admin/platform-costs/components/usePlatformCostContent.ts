@@ -3,11 +3,17 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import {
+  getV2ExportPlatformCostLogs,
   useGetV2GetPlatformCostDashboard,
   useGetV2GetPlatformCostLogs,
 } from "@/app/api/__generated__/endpoints/admin/admin";
 import { okData } from "@/app/api/helpers";
-import { estimateCostForRow, toLocalInput, toUtcIso } from "../helpers";
+import {
+  buildCostLogsCsv,
+  estimateCostForRow,
+  toLocalInput,
+  toUtcIso,
+} from "../helpers";
 
 interface InitialSearchParams {
   start?: string;
@@ -37,6 +43,7 @@ export function usePlatformCostContent(searchParams: InitialSearchParams) {
   const [rateOverrides, setRateOverrides] = useState<Record<string, number>>(
     {},
   );
+  const [exporting, setExporting] = useState(false);
 
   // Pass ISO date strings through `as unknown as Date` so Orval's URL builder
   // forwards them as-is. Date.toString() produces a format FastAPI rejects;
@@ -105,6 +112,33 @@ export function usePlatformCostContent(searchParams: InitialSearchParams) {
     });
   }
 
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const response = await getV2ExportPlatformCostLogs(filterParams);
+      const data = okData(response);
+      if (!data) throw new Error("Export failed: unexpected response");
+      const csv = buildCostLogsCsv(data.logs);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `platform_costs_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      if (data.truncated) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `Export truncated: only the first ${data.total_rows} rows were included.`,
+        );
+      }
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const totalEstimatedCost =
     dashboard?.by_provider.reduce((sum, row) => {
       const est = estimateCostForRow(row, rateOverrides);
@@ -132,5 +166,7 @@ export function usePlatformCostContent(searchParams: InitialSearchParams) {
     handleRateOverride,
     updateUrl,
     handleFilter,
+    exporting,
+    handleExport,
   };
 }

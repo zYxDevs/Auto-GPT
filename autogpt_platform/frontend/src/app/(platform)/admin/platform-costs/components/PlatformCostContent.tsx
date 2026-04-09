@@ -41,6 +41,8 @@ export function PlatformCostContent({ searchParams }: Props) {
     handleRateOverride,
     updateUrl,
     handleFilter,
+    exporting,
+    handleExport,
   } = usePlatformCostContent(searchParams);
 
   return (
@@ -224,6 +226,8 @@ export function PlatformCostContent({ searchParams }: Props) {
                 logs={logs}
                 pagination={pagination}
                 onPageChange={(p) => updateUrl({ page: p.toString() })}
+                onExport={handleExport}
+                exporting={exporting}
               />
             </div>
           )}

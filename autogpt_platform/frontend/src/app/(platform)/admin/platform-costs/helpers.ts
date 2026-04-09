@@ -1,3 +1,4 @@
+import type { CostLogRow } from "@/app/api/__generated__/models/costLogRow";
 import type { ProviderCostSummary } from "@/app/api/__generated__/models/providerCostSummary";
 
 const MICRODOLLARS_PER_USD = 1_000_000;
@@ -224,4 +225,55 @@ export function toUtcIso(local: string) {
   if (!local) return "";
   const d = new Date(local);
   return isNaN(d.getTime()) ? "" : d.toISOString();
+}
+
+const CSV_HEADERS = [
+  "Time (UTC)",
+  "User ID",
+  "Email",
+  "Block",
+  "Provider",
+  "Type",
+  "Model",
+  "Cost (USD)",
+  "Input Tokens",
+  "Output Tokens",
+  "Cache Read Tokens",
+  "Cache Creation Tokens",
+  "Duration (s)",
+  "Graph Exec ID",
+  "Node Exec ID",
+];
+
+function csvEscape(val: unknown): string {
+  const s = val == null ? "" : String(val);
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+export function buildCostLogsCsv(logs: CostLogRow[]): string {
+  const header = CSV_HEADERS.map(csvEscape).join(",");
+  const rows = logs.map((log) =>
+    [
+      log.created_at,
+      log.user_id,
+      log.email,
+      log.block_name,
+      log.provider,
+      log.tracking_type,
+      log.model,
+      log.cost_microdollars != null
+        ? (log.cost_microdollars / 1_000_000).toFixed(8)
+        : null,
+      log.input_tokens,
+      log.output_tokens,
+      log.cache_read_tokens,
+      log.cache_creation_tokens,
+      log.duration,
+      log.graph_exec_id,
+      log.node_exec_id,
+    ]
+      .map(csvEscape)
+      .join(","),
+  );
+  return [header, ...rows].join("\r\n");
 }

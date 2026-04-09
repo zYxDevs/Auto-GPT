@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { CostLogRow } from "@/app/api/__generated__/models/costLogRow";
 import type { ProviderCostSummary } from "@/app/api/__generated__/models/providerCostSummary";
 import {
   toDateOrUndefined,
+  buildCostLogsCsv,
   formatMicrodollars,
   formatTokens,
   formatDuration,
@@ -315,5 +317,52 @@ describe("toUtcIso", () => {
   it("converts local datetime-local to ISO string", () => {
     const result = toUtcIso("2026-01-15T12:30");
     expect(result).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+});
+
+describe("buildCostLogsCsv", () => {
+  function makeLog(overrides: Partial<CostLogRow>): CostLogRow {
+    return {
+      id: "abc123",
+      created_at: "2026-01-15T10:00:00Z" as unknown as Date,
+      block_name: "LLMBlock",
+      provider: "anthropic",
+      ...overrides,
+    };
+  }
+
+  it("emits a header row and one data row", () => {
+    const csv = buildCostLogsCsv([makeLog({})]);
+    const lines = csv.split("\r\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("Time (UTC)");
+    expect(lines[0]).toContain("Provider");
+    expect(lines[1]).toContain("anthropic");
+  });
+
+  it("escapes double-quotes in field values", () => {
+    const csv = buildCostLogsCsv([makeLog({ block_name: 'Say "Hello"' })]);
+    expect(csv).toContain('"Say ""Hello"""');
+  });
+
+  it("converts cost_microdollars to USD with 8 decimal places", () => {
+    const csv = buildCostLogsCsv([makeLog({ cost_microdollars: 1_234_567 })]);
+    expect(csv).toContain("1.23456700");
+  });
+
+  it("includes cache token columns", () => {
+    const csv = buildCostLogsCsv([
+      makeLog({ cache_read_tokens: 500, cache_creation_tokens: 100 }),
+    ]);
+    const lines = csv.split("\r\n");
+    expect(lines[0]).toContain("Cache Read Tokens");
+    expect(lines[0]).toContain("Cache Creation Tokens");
+    expect(lines[1]).toContain('"500"');
+    expect(lines[1]).toContain('"100"');
+  });
+
+  it("returns only header for empty log list", () => {
+    const csv = buildCostLogsCsv([]);
+    expect(csv.split("\r\n")).toHaveLength(1);
   });
 });

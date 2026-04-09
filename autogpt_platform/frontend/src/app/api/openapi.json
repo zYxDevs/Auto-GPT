@@ -7473,6 +7473,81 @@
           }
         }
       }
+    },
+    "/api/admin/platform-costs/logs/export": {
+      "get": {
+        "tags": ["v2", "admin", "platform-cost", "admin"],
+        "summary": "Export Platform Cost Logs",
+        "operationId": "getV2Export platform cost logs",
+        "security": [{ "HTTPBearerJWT": [] }],
+        "parameters": [
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "type": "string", "format": "date-time" },
+                { "type": "null" }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "type": "string", "format": "date-time" },
+                { "type": "null" }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "Provider"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformCostExportResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/HTTP401NotAuthenticatedError"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8947,6 +9022,14 @@
           "output_tokens": {
             "anyOf": [{ "type": "integer" }, { "type": "null" }],
             "title": "Output Tokens"
+          },
+          "cache_read_tokens": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Cache Read Tokens"
+          },
+          "cache_creation_tokens": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Cache Creation Tokens"
           },
           "duration": {
             "anyOf": [{ "type": "number" }, { "type": "null" }],
@@ -15746,6 +15829,20 @@
           "expires_in_hours"
         ],
         "title": "UploadFileResponse"
+      },
+      "PlatformCostExportResponse": {
+        "properties": {
+          "logs": {
+            "items": { "$ref": "#/components/schemas/CostLogRow" },
+            "type": "array",
+            "title": "Logs"
+          },
+          "total_rows": { "type": "integer", "title": "Total Rows" },
+          "truncated": { "type": "boolean", "title": "Truncated" }
+        },
+        "type": "object",
+        "required": ["logs", "total_rows", "truncated"],
+        "title": "PlatformCostExportResponse"
       }
     },
     "securitySchemes": {

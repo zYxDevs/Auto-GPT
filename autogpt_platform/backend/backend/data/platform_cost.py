@@ -157,6 +157,8 @@ class CostLogRow(BaseModel):
     output_tokens: int | None = None
     duration: float | None = None
     model: str | None = None
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
 
 
 class PlatformCostDashboard(BaseModel):
@@ -370,6 +372,8 @@ async def get_platform_cost_logs(
                 p."costMicrodollars" AS cost_microdollars,
                 p."inputTokens" AS input_tokens,
                 p."outputTokens" AS output_tokens,
+                p."cacheReadTokens" AS cache_read_tokens,
+                p."cacheCreationTokens" AS cache_creation_tokens,
                 p."duration",
                 p."model"
             FROM {{schema_prefix}}"PlatformCostLog" p
@@ -399,9 +403,85 @@ async def get_platform_cost_logs(
             cost_microdollars=r.get("cost_microdollars"),
             input_tokens=r.get("input_tokens"),
             output_tokens=r.get("output_tokens"),
+            cache_read_tokens=r.get("cache_read_tokens"),
+            cache_creation_tokens=r.get("cache_creation_tokens"),
             duration=r.get("duration"),
             model=r.get("model"),
         )
         for r in rows
     ]
     return logs, total
+
+
+EXPORT_MAX_ROWS = 100_000
+
+
+async def get_platform_cost_logs_for_export(
+    start: datetime | None = None,
+    end: datetime | None = None,
+    provider: str | None = None,
+    user_id: str | None = None,
+) -> tuple[list[CostLogRow], bool]:
+    """Return all matching rows up to EXPORT_MAX_ROWS.
+
+    Returns (rows, truncated) where truncated=True means the result was capped
+    and the caller should warn the user that not all rows are included.
+    """
+    if start is None:
+        start = datetime.now(tz=timezone.utc) - timedelta(days=DEFAULT_DASHBOARD_DAYS)
+    where_sql, params = _build_where(start, end, provider, user_id, "p")
+    limit_idx = len(params) + 1
+
+    rows = await query_raw_with_schema(
+        f"""
+        SELECT
+            p."id",
+            p."createdAt" AS created_at,
+            p."userId" AS user_id,
+            u."email",
+            p."graphExecId" AS graph_exec_id,
+            p."nodeExecId" AS node_exec_id,
+            p."blockName" AS block_name,
+            p."provider",
+            p."trackingType" AS tracking_type,
+            p."costMicrodollars" AS cost_microdollars,
+            p."inputTokens" AS input_tokens,
+            p."outputTokens" AS output_tokens,
+            p."cacheReadTokens" AS cache_read_tokens,
+            p."cacheCreationTokens" AS cache_creation_tokens,
+            p."duration",
+            p."model"
+        FROM {{schema_prefix}}"PlatformCostLog" p
+        LEFT JOIN {{schema_prefix}}"User" u ON u."id" = p."userId"
+        WHERE {where_sql}
+        ORDER BY p."createdAt" DESC, p."id" DESC
+        LIMIT ${limit_idx}
+        """,
+        *params,
+        EXPORT_MAX_ROWS + 1,
+    )
+
+    truncated = len(rows) > EXPORT_MAX_ROWS
+    rows = rows[:EXPORT_MAX_ROWS]
+
+    return [
+        CostLogRow(
+            id=r["id"],
+            created_at=r["created_at"],
+            user_id=r.get("user_id"),
+            email=_mask_email(r.get("email")),
+            graph_exec_id=r.get("graph_exec_id"),
+            node_exec_id=r.get("node_exec_id"),
+            block_name=r["block_name"],
+            provider=r["provider"],
+            tracking_type=r.get("tracking_type"),
+            cost_microdollars=r.get("cost_microdollars"),
+            input_tokens=r.get("input_tokens"),
+            output_tokens=r.get("output_tokens"),
+            cache_read_tokens=r.get("cache_read_tokens"),
+            cache_creation_tokens=r.get("cache_creation_tokens"),
+            duration=r.get("duration"),
+            model=r.get("model"),
+        )
+        for r in rows
+    ], truncated
