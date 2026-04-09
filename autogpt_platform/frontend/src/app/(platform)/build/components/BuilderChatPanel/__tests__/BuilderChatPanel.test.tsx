@@ -49,6 +49,7 @@ function makeMockHook(
     inputValue: "",
     setInputValue: vi.fn(),
     handleSend: vi.fn(),
+    sendRawMessage: vi.fn(),
     handleKeyDown: vi.fn(),
     isStreaming: false,
     canSend: false,

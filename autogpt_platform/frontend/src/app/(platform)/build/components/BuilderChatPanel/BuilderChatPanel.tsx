@@ -13,6 +13,7 @@ import {
 import { KeyboardEvent, useEffect, useRef } from "react";
 import { ToolUIPart } from "ai";
 import { MessagePartRenderer } from "@/app/(platform)/copilot/components/ChatMessagesContainer/components/MessagePartRenderer";
+import { CopilotChatActionsProvider } from "@/app/(platform)/copilot/components/CopilotChatActionsProvider/CopilotChatActionsProvider";
 import type { CustomNode } from "../FlowEditor/nodes/CustomNode/CustomNode";
 import {
   GraphAction,
@@ -53,6 +54,7 @@ export function BuilderChatPanel({
     inputValue,
     setInputValue,
     handleSend,
+    sendRawMessage,
     handleKeyDown,
     isStreaming,
     canSend,
@@ -80,43 +82,45 @@ export function BuilderChatPanel({
       )}
     >
       {isOpen && (
-        <div
-          ref={panelRef}
-          role="complementary"
-          aria-label="Builder chat panel"
-          className="pointer-events-auto flex h-[70vh] w-96 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
-        >
-          <PanelHeader
-            onClose={handleToggle}
-            undoCount={undoStack.length}
-            onUndo={handleUndoLastAction}
-          />
+        <CopilotChatActionsProvider onSend={sendRawMessage}>
+          <div
+            ref={panelRef}
+            role="complementary"
+            aria-label="Builder chat panel"
+            className="pointer-events-auto flex h-[70vh] w-96 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
+          >
+            <PanelHeader
+              onClose={handleToggle}
+              undoCount={undoStack.length}
+              onUndo={handleUndoLastAction}
+            />
 
-          <MessageList
-            messages={messages}
-            isCreatingSession={isCreatingSession}
-            sessionError={sessionError}
-            streamError={error}
-            nodes={nodes}
-            parsedActions={parsedActions}
-            appliedActionKeys={appliedActionKeys}
-            onApplyAction={handleApplyAction}
-            onRetry={retrySession}
-            messagesEndRef={messagesEndRef}
-            isStreaming={isStreaming}
-          />
+            <MessageList
+              messages={messages}
+              isCreatingSession={isCreatingSession}
+              sessionError={sessionError}
+              streamError={error}
+              nodes={nodes}
+              parsedActions={parsedActions}
+              appliedActionKeys={appliedActionKeys}
+              onApplyAction={handleApplyAction}
+              onRetry={retrySession}
+              messagesEndRef={messagesEndRef}
+              isStreaming={isStreaming}
+            />
 
-          <PanelInput
-            value={inputValue}
-            onChange={setInputValue}
-            onKeyDown={handleKeyDown}
-            onSend={handleSend}
-            onStop={stop}
-            isStreaming={isStreaming}
-            isDisabled={!canSend}
-            textareaRef={textareaRef}
-          />
-        </div>
+            <PanelInput
+              value={inputValue}
+              onChange={setInputValue}
+              onKeyDown={handleKeyDown}
+              onSend={handleSend}
+              onStop={stop}
+              isStreaming={isStreaming}
+              isDisabled={!canSend}
+              textareaRef={textareaRef}
+            />
+          </div>
+        </CopilotChatActionsProvider>
       )}
 
       <button

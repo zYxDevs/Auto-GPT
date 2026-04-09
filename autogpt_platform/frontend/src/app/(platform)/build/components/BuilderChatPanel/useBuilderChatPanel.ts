@@ -564,6 +564,14 @@ export function useBuilderChatPanel({
     setUndoStack((prev) => prev.slice(0, -1));
   }
 
+  // Sends an arbitrary text message directly, bypassing the input field.
+  // Used by CopilotChatActionsProvider so tool components (e.g. EditAgentTool)
+  // can programmatically send "try again" prompts without touching the textarea.
+  function sendRawMessage(text: string) {
+    if (!text || !canSend) return;
+    sendMessage({ text });
+  }
+
   return {
     isOpen,
     handleToggle,
@@ -584,6 +592,7 @@ export function useBuilderChatPanel({
     inputValue,
     setInputValue,
     handleSend,
+    sendRawMessage,
     handleKeyDown,
     isStreaming,
     canSend,
