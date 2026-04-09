@@ -343,11 +343,15 @@ export function useBuilderChatPanel({
   // Resets session error state so the session-creation effect re-runs on
   // the next render without toggling the panel closed and back open.
   // Also evicts the stale cached session so a fresh one is created.
+  // hasSentSeedMessageRef is reset so the seed message is re-sent to the
+  // new session (it may have been set to true by a previous successful session
+  // that was later invalidated without a flowID change).
   function retrySession() {
     if (flowID) graphSessionCache.delete(flowID);
     setSessionId(null);
     setSessionError(false);
     isCreatingSessionRef.current = false;
+    hasSentSeedMessageRef.current = false;
   }
 
   function handleSend() {

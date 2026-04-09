@@ -856,6 +856,35 @@ describe("useBuilderChatPanel – retrySession", () => {
     expect(result.current.sessionError).toBe(false);
     expect(result.current.sessionId).toBe("sess-retry");
   });
+
+  it("re-sends seed message to new session after retry (hasSentSeedMessageRef is reset)", async () => {
+    // First session succeeds and seed is sent
+    mockPostV2CreateSession.mockResolvedValueOnce({
+      status: 200,
+      data: { id: "sess-first" },
+    });
+    const { result } = renderHook(() =>
+      useBuilderChatPanel({ isGraphLoaded: true }),
+    );
+    await openAndFlush(() => result.current.handleToggle());
+    expect(result.current.sessionId).toBe("sess-first");
+    expect(mockSendMessage).toHaveBeenCalledOnce();
+
+    // Force a retry: evict cache and set error state manually, then retry
+    mockSendMessage.mockClear();
+    mockPostV2CreateSession.mockResolvedValueOnce({
+      status: 200,
+      data: { id: "sess-retry-seed" },
+    });
+    await act(async () => {
+      result.current.retrySession();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+
+    // New session obtained; seed message must be sent again to the new session
+    expect(result.current.sessionId).toBe("sess-retry-seed");
+    expect(mockSendMessage).toHaveBeenCalledOnce();
+  });
 });
 
 describe("useBuilderChatPanel – handleSend", () => {
