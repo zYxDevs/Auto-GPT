@@ -144,7 +144,7 @@ export default function CreditsPage() {
 
       {/* Subscription Tier */}
       <div className="mb-8">
-        <SubscriptionTierSection autoTopUpConfig={autoTopUpConfig} />
+        <SubscriptionTierSection />
       </div>
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">

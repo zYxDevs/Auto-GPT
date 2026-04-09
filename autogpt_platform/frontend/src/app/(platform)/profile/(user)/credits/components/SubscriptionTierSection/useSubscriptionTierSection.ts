@@ -7,9 +7,7 @@ export type SubscriptionStatus = {
   tier_costs: Record<string, number>;
 };
 
-type AutoTopUpConfig = { amount: number; threshold: number } | null;
-
-export function useSubscriptionTierSection(autoTopUpConfig: AutoTopUpConfig) {
+export function useSubscriptionTierSection() {
   const api = useMemo(() => new AutoGPTServerAPI(), []);
 
   const [subscription, setSubscription] = useState<SubscriptionStatus | null>(
@@ -36,19 +34,20 @@ export function useSubscriptionTierSection(autoTopUpConfig: AutoTopUpConfig) {
 
   const changeTier = useCallback(
     async (tier: string): Promise<string | null> => {
-      const targetCost = subscription?.tier_costs[tier] ?? 0;
-
-      if (
-        targetCost > 0 &&
-        (!autoTopUpConfig || autoTopUpConfig.amount < targetCost)
-      ) {
-        return `Auto top-up amount must be at least $${(targetCost / 100).toFixed(2)} to subscribe to this tier. Configure it below first.`;
-      }
-
       setIsPending(true);
       try {
-        const updated = await api.setSubscriptionTier(tier);
-        setSubscription(updated);
+        const successUrl = `${window.location.origin}${window.location.pathname}?subscription=success`;
+        const cancelUrl = `${window.location.origin}${window.location.pathname}?subscription=cancelled`;
+        const result = await api.setSubscriptionTier(
+          tier,
+          successUrl,
+          cancelUrl,
+        );
+        if (result.url) {
+          window.location.href = result.url;
+          return null;
+        }
+        await fetchSubscription();
         return null;
       } catch (e: unknown) {
         const msg =
@@ -58,7 +57,7 @@ export function useSubscriptionTierSection(autoTopUpConfig: AutoTopUpConfig) {
         setIsPending(false);
       }
     },
-    [api, subscription, autoTopUpConfig],
+    [api, fetchSubscription],
   );
 
   return {

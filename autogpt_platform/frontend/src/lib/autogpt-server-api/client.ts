@@ -202,12 +202,16 @@ export default class BackendAPI {
     return this._get("/credits/subscription");
   }
 
-  setSubscriptionTier(tier: string): Promise<{
-    tier: string;
-    monthly_cost: number;
-    tier_costs: Record<string, number>;
-  }> {
-    return this._request("POST", "/credits/subscription", { tier });
+  setSubscriptionTier(
+    tier: string,
+    successUrl?: string,
+    cancelUrl?: string,
+  ): Promise<{ url: string }> {
+    return this._request("POST", "/credits/subscription", {
+      tier,
+      success_url: successUrl ?? "",
+      cancel_url: cancelUrl ?? "",
+    });
   }
 
   ////////////////////////////////////////

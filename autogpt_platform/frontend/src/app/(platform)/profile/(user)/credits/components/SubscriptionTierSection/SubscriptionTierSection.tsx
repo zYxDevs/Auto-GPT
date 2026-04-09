@@ -36,13 +36,9 @@ function formatCost(cents: number): string {
   return `$${(cents / 100).toFixed(2)}/mo`;
 }
 
-interface Props {
-  autoTopUpConfig: { amount: number; threshold: number } | null;
-}
-
-export function SubscriptionTierSection({ autoTopUpConfig }: Props) {
+export function SubscriptionTierSection() {
   const { subscription, isLoading, error, isPending, changeTier } =
-    useSubscriptionTierSection(autoTopUpConfig);
+    useSubscriptionTierSection();
   const [tierError, setTierError] = useState<string | null>(null);
 
   if (isLoading) return null;
@@ -135,8 +131,8 @@ export function SubscriptionTierSection({ autoTopUpConfig }: Props) {
 
       {subscription.tier !== "FREE" && (
         <p className="text-sm text-neutral-500">
-          Subscription charged monthly from your credits. Auto top-up required ≥
-          subscription cost.
+          Your subscription is managed through Stripe. Changes take effect
+          immediately.
         </p>
       )}
     </div>
