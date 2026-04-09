@@ -1,8 +1,5 @@
--- CreateEnum
-CREATE TYPE "SubscriptionTier" AS ENUM ('FREE', 'PRO', 'BUSINESS', 'ENTERPRISE');
+-- SubscriptionTier enum and User.subscriptionTier column already created by
+-- 20260326200000_add_rate_limit_tier migration. Only add SUBSCRIPTION transaction type.
 
 -- AlterEnum
-ALTER TYPE "CreditTransactionType" ADD VALUE 'SUBSCRIPTION';
-
--- AlterTable
-ALTER TABLE "User" ADD COLUMN "subscriptionTier" "SubscriptionTier" NOT NULL DEFAULT 'FREE';
+ALTER TYPE "CreditTransactionType" ADD VALUE IF NOT EXISTS 'SUBSCRIPTION';
