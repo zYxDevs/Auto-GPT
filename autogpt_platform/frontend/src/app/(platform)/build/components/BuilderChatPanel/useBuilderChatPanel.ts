@@ -46,6 +46,9 @@ interface UndoSnapshot {
  */
 const graphSessionCache = new Map<string, string>();
 
+/** Stable empty array so the useShallow selector returns the same reference when the panel is closed. */
+const EMPTY_NODES: never[] = [];
+
 /** Clears the session cache. Exported only for use in tests. */
 export function clearGraphSessionCacheForTesting() {
   graphSessionCache.clear();
@@ -106,7 +109,9 @@ export function useBuilderChatPanel({
   });
   const { toast } = useToast();
 
-  const nodes = useNodeStore(useShallow((s) => (isOpen ? s.nodes : [])));
+  const nodes = useNodeStore(
+    useShallow((s) => (isOpen ? s.nodes : EMPTY_NODES)),
+  );
   const setNodes = useNodeStore((s) => s.setNodes);
   const setEdges = useEdgeStore((s) => s.setEdges);
 

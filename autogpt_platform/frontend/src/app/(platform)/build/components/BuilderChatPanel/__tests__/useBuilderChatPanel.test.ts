@@ -205,6 +205,32 @@ describe("useBuilderChatPanel – session lifecycle", () => {
     expect(mockPostV2CreateSession).toHaveBeenCalledOnce();
     expect(result.current.sessionId).toBe("sess-existing");
   });
+
+  it("sets sessionError when session creation returns a path-traversal id (security validation)", async () => {
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "../../admin" },
+    });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    expect(result.current.sessionError).toBe(true);
+    expect(result.current.sessionId).toBeNull();
+  });
+
+  it("sets sessionError when session creation returns an id with spaces", async () => {
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess 1" },
+    });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    expect(result.current.sessionError).toBe(true);
+    expect(result.current.sessionId).toBeNull();
+  });
 });
 
 describe("useBuilderChatPanel – no auto-send on open", () => {
@@ -1276,5 +1302,110 @@ describe("useBuilderChatPanel – prototype pollution guard", () => {
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ variant: "destructive" }),
     );
+  });
+});
+
+describe("useBuilderChatPanel – tool call detection", () => {
+  function makeDynamicToolPart(
+    toolName: string,
+    toolCallId: string,
+    state: string,
+    output: unknown = null,
+  ) {
+    return { type: "dynamic-tool", toolName, toolCallId, state, output };
+  }
+
+  it("calls onGraphEdited when edit_agent tool call completes", async () => {
+    mockChatStatus = "ready";
+    mockChatMessages = [
+      {
+        id: "m1",
+        role: "assistant",
+        parts: [
+          makeDynamicToolPart("edit_agent", "tc-1", "output-available", null),
+        ],
+      },
+    ];
+    const onGraphEdited = vi.fn();
+    renderHook(() => useBuilderChatPanel({ onGraphEdited }));
+
+    await act(async () => {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+
+    expect(onGraphEdited).toHaveBeenCalledOnce();
+  });
+
+  it("does NOT call onGraphEdited for a tool call that is not output-available", async () => {
+    mockChatStatus = "ready";
+    mockChatMessages = [
+      {
+        id: "m1",
+        role: "assistant",
+        parts: [
+          makeDynamicToolPart("edit_agent", "tc-pending", "pending", null),
+        ],
+      },
+    ];
+    const onGraphEdited = vi.fn();
+    renderHook(() => useBuilderChatPanel({ onGraphEdited }));
+
+    await act(async () => {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+
+    expect(onGraphEdited).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call onGraphEdited when status is streaming", async () => {
+    mockChatStatus = "streaming";
+    mockChatMessages = [
+      {
+        id: "m1",
+        role: "assistant",
+        parts: [
+          makeDynamicToolPart(
+            "edit_agent",
+            "tc-stream",
+            "output-available",
+            null,
+          ),
+        ],
+      },
+    ];
+    const onGraphEdited = vi.fn();
+    renderHook(() => useBuilderChatPanel({ onGraphEdited }));
+
+    await act(async () => {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+
+    expect(onGraphEdited).not.toHaveBeenCalled();
+  });
+
+  it("does NOT process the same tool call twice (processedToolCallsRef deduplication)", async () => {
+    mockChatStatus = "ready";
+    const part = makeDynamicToolPart(
+      "edit_agent",
+      "tc-dedup",
+      "output-available",
+      null,
+    );
+    mockChatMessages = [{ id: "m1", role: "assistant", parts: [part] }];
+
+    const onGraphEdited = vi.fn();
+    const { rerender } = renderHook(() =>
+      useBuilderChatPanel({ onGraphEdited }),
+    );
+
+    await act(async () => {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+
+    expect(onGraphEdited).toHaveBeenCalledOnce();
+
+    act(() => rerender());
+
+    expect(onGraphEdited).toHaveBeenCalledOnce();
   });
 });
