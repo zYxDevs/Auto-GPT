@@ -74,10 +74,9 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
     >
       {isOpen && (
         <div
-          role="dialog"
+          role="complementary"
           aria-label="Builder chat panel"
-          aria-modal="true"
-          className="pointer-events-auto flex h-[70vh] w-96 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
+          className="pointer-events-auto flex h-[70vh] w-96 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
         >
           <PanelHeader
             onClose={handleToggle}
@@ -230,16 +229,23 @@ function MessageList({
         </div>
       )}
 
-      {visibleMessages.length === 0 && !isCreatingSession && !sessionError && (
-        <div className="flex flex-col items-center gap-2 py-6 text-center text-xs text-slate-400">
-          <ChatCircle size={28} weight="duotone" className="text-violet-300" />
-          <p>Ask me to explain or modify your agent.</p>
-          <p className="text-slate-300">
-            You can say things like &ldquo;What does this agent do?&rdquo; or
-            &ldquo;Add a step that formats the output.&rdquo;
-          </p>
-        </div>
-      )}
+      {visibleMessages.length === 0 &&
+        !isCreatingSession &&
+        !sessionError &&
+        !messages.some((m) => m.id === seedMessageId) && (
+          <div className="flex flex-col items-center gap-2 py-6 text-center text-xs text-slate-400">
+            <ChatCircle
+              size={28}
+              weight="duotone"
+              className="text-violet-300"
+            />
+            <p>Ask me to explain or modify your agent.</p>
+            <p className="text-slate-300">
+              You can say things like &ldquo;What does this agent do?&rdquo; or
+              &ldquo;Add a step that formats the output.&rdquo;
+            </p>
+          </div>
+        )}
 
       {visibleMessages.length === 0 &&
         messages.some((m) => m.id === seedMessageId) && (
@@ -280,6 +286,16 @@ function MessageList({
                     <pre className="my-1 overflow-x-auto rounded bg-slate-200 p-2 font-mono text-xs">
                       {children}
                     </pre>
+                  ),
+                  a: ({ href, children }) => (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:no-underline"
+                    >
+                      {children}
+                    </a>
                   ),
                 }}
               >

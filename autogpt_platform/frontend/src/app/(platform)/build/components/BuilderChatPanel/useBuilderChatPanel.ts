@@ -66,8 +66,8 @@ export function useBuilderChatPanel({
   const [{ flowID }] = useQueryStates({ flowID: parseAsString });
   const { toast } = useToast();
 
-  const nodes = useNodeStore(useShallow((s) => s.nodes));
-  const edges = useEdgeStore(useShallow((s) => s.edges));
+  const nodes = useNodeStore(useShallow((s) => (isOpen ? s.nodes : [])));
+  const edges = useEdgeStore(useShallow((s) => (isOpen ? s.edges : [])));
   const setNodes = useNodeStore((s) => s.setNodes);
   const setEdges = useEdgeStore((s) => s.setEdges);
 
@@ -78,6 +78,7 @@ export function useBuilderChatPanel({
     setSessionError(false);
     setAppliedActionKeys(new Set());
     setUndoStack([]);
+    setInputValue("");
     hasSentSeedMessageRef.current = false;
     // Also reset the creation ref so a new session can be started after
     // navigation, even if one was in-flight when flowID changed.
@@ -101,7 +102,15 @@ export function useBuilderChatPanel({
         const res = await postV2CreateSession(null);
         if (cancelled) return;
         if (res.status === 200) {
-          setSessionId(res.data.id);
+          const id = res.data.id;
+          // Validate the session ID is a safe non-empty identifier before
+          // interpolating it into the streaming URL — rejects values that
+          // contain path-traversal characters or whitespace.
+          if (typeof id !== "string" || !id || !/^[\w-]+$/i.test(id)) {
+            setSessionError(true);
+            return;
+          }
+          setSessionId(id);
         } else {
           setSessionError(true);
         }
@@ -256,7 +265,10 @@ export function useBuilderChatPanel({
 
   function handleApplyAction(action: GraphAction) {
     if (action.type === "update_node_input") {
-      const node = nodes.find((n) => n.id === action.nodeId);
+      // Read live state for both validation and mutation so rapid successive
+      // applies see the latest nodes rather than a stale render-cycle snapshot.
+      const liveNodes = useNodeStore.getState().nodes;
+      const node = liveNodes.find((n) => n.id === action.nodeId);
       if (!node) {
         toast({
           title: "Cannot apply change",
@@ -276,12 +288,15 @@ export function useBuilderChatPanel({
         });
         return;
       }
-      // Capture a full nodes snapshot before mutating. Both the apply and the
-      // restore use setNodes (not updateNodeData) to bypass the global history
-      // store — this keeps chat-panel changes completely separate from Ctrl+Z,
-      // preventing the "Applied" badge from going stale after a global undo.
-      const prevNodes = useNodeStore.getState().nodes;
-      const nextNodes = prevNodes.map((n) =>
+      // Capture a shallow-copied nodes snapshot before mutating. Spreading
+      // ensures the undo restore references an independent array rather than
+      // the same reference that the store may update in-place.
+      // Both the apply and the restore use setNodes (not updateNodeData) to
+      // bypass the global history store — this keeps chat-panel changes
+      // completely separate from Ctrl+Z, preventing the "Applied" badge from
+      // going stale after a global undo.
+      const prevNodes = [...liveNodes];
+      const nextNodes = liveNodes.map((n) =>
         n.id === action.nodeId
           ? {
               ...n,
@@ -313,8 +328,11 @@ export function useBuilderChatPanel({
       });
       setNodes(nextNodes);
     } else if (action.type === "connect_nodes") {
-      const sourceNode = nodes.find((n) => n.id === action.source);
-      const targetNode = nodes.find((n) => n.id === action.target);
+      // Read live state so validation reflects the current graph even when
+      // multiple actions are applied within the same render cycle.
+      const liveNodes = useNodeStore.getState().nodes;
+      const sourceNode = liveNodes.find((n) => n.id === action.source);
+      const targetNode = liveNodes.find((n) => n.id === action.target);
       if (!sourceNode || !targetNode) {
         toast({
           title: "Cannot apply connection",
@@ -343,10 +361,11 @@ export function useBuilderChatPanel({
         return;
       }
       const edgeId = `${action.source}:${action.sourceHandle}->${action.target}:${action.targetHandle}`;
-      // Capture a full edges snapshot before mutating. Both the apply and the
-      // restore use setEdges (not addEdge/removeEdge) to bypass the global
-      // history store — keeps chat-panel changes separate from Ctrl+Z.
-      const prevEdges = useEdgeStore.getState().edges;
+      // Shallow-copy the edges snapshot so the undo restore references an
+      // independent array rather than the same reference the store may update.
+      // Both the apply and the restore use setEdges (not addEdge/removeEdge)
+      // to bypass the global history store — keeps chat-panel changes separate.
+      const prevEdges = [...useEdgeStore.getState().edges];
       // Guard against duplicate edges — the same connection may appear after an
       // undo-then-reapply or from identical suggestions across AI messages.
       const alreadyExists = prevEdges.some(
@@ -358,9 +377,11 @@ export function useBuilderChatPanel({
       );
       if (alreadyExists) {
         // Edge already present — mark as applied without duplicating it.
-        setAppliedActionKeys(
-          (prev) => new Set([...prev, getActionKey(action)]),
-        );
+        setAppliedActionKeys((prev) => {
+          const next = new Set(prev);
+          next.add(getActionKey(action));
+          return next;
+        });
         return;
       }
       const key = getActionKey(action);
@@ -402,7 +423,11 @@ export function useBuilderChatPanel({
       const _: never = action;
       return _;
     }
-    setAppliedActionKeys((prev) => new Set([...prev, getActionKey(action)]));
+    setAppliedActionKeys((prev) => {
+      const next = new Set(prev);
+      next.add(getActionKey(action));
+      return next;
+    });
   }
 
   function handleUndoLastAction() {

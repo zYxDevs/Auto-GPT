@@ -345,10 +345,10 @@ describe("BuilderChatPanel", () => {
     expect(retrySession).toHaveBeenCalledOnce();
   });
 
-  it("renders the panel with role=dialog and message list with role=log", () => {
+  it("renders the panel with role=complementary and message list with role=log", () => {
     mockUseBuilderChatPanel.mockReturnValue(makeMockHook({ isOpen: true }));
     render(<BuilderChatPanel />);
-    expect(screen.getByRole("dialog")).toBeDefined();
+    expect(screen.getByRole("complementary")).toBeDefined();
     expect(screen.getByRole("log")).toBeDefined();
   });
 

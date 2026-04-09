@@ -44,10 +44,6 @@ vi.mock("@/app/api/__generated__/endpoints/chat/chat", () => ({
   postV2CreateSession: (...args: unknown[]) => mockPostV2CreateSession(...args),
 }));
 
-vi.mock("@/app/api/__generated__/endpoints/graphs/graphs", () => ({
-  getGetV1GetSpecificGraphQueryKey: (id: string) => ["graphs", id],
-}));
-
 vi.mock("@/lib/supabase/actions", () => ({
   getWebSocketToken: vi.fn().mockResolvedValue({ token: "tok", error: null }),
 }));
@@ -409,6 +405,7 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
           sourceHandle: "output",
           targetHandle: "input",
           type: "custom",
+          markerEnd: expect.objectContaining({ type: "arrowclosed" }),
         }),
       ]),
     );
@@ -581,6 +578,7 @@ describe("useBuilderChatPanel – handleApplyAction", () => {
           sourceHandle: "result",
           targetHandle: "input",
           type: "custom",
+          markerEnd: expect.objectContaining({ type: "arrowclosed" }),
         }),
       ]),
     );
@@ -1146,5 +1144,115 @@ describe("useBuilderChatPanel – handleUndoLastAction on empty stack", () => {
     expect(mockSetNodes).not.toHaveBeenCalled();
     expect(mockSetEdges).not.toHaveBeenCalled();
     expect(result.current.undoStack).toHaveLength(0);
+  });
+});
+
+describe("useBuilderChatPanel – transport prepareSendMessagesRequest", () => {
+  it("calls getWebSocketToken and returns correct request body", async () => {
+    const { getWebSocketToken } = await import("@/lib/supabase/actions");
+    const { DefaultChatTransport } = await import("ai");
+    const MockTransport = DefaultChatTransport as ReturnType<typeof vi.fn>;
+
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-transport" },
+    });
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    expect(MockTransport).toHaveBeenCalled();
+    const ctorArg = MockTransport.mock.calls[
+      MockTransport.mock.calls.length - 1
+    ][0] as {
+      prepareSendMessagesRequest: (args: {
+        messages: unknown[];
+      }) => Promise<unknown>;
+    };
+    expect(typeof ctorArg.prepareSendMessagesRequest).toBe("function");
+
+    const messages = [
+      { role: "user", parts: [{ type: "text", text: "hello" }] },
+    ];
+    const req = await ctorArg.prepareSendMessagesRequest({ messages });
+
+    expect(getWebSocketToken).toHaveBeenCalled();
+    expect(req).toMatchObject({
+      body: { message: "hello", is_user_message: true },
+      headers: { Authorization: "Bearer tok" },
+    });
+  });
+
+  it("throws when getWebSocketToken returns null token", async () => {
+    const { getWebSocketToken } = await import("@/lib/supabase/actions");
+    const { DefaultChatTransport } = await import("ai");
+    const MockTransport = DefaultChatTransport as ReturnType<typeof vi.fn>;
+
+    vi.mocked(getWebSocketToken).mockResolvedValueOnce({
+      token: null,
+      error: "auth failed",
+    });
+
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-auth-fail" },
+    });
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    const ctorArg = MockTransport.mock.calls[
+      MockTransport.mock.calls.length - 1
+    ][0] as {
+      prepareSendMessagesRequest: (args: {
+        messages: unknown[];
+      }) => Promise<unknown>;
+    };
+    const messages = [{ role: "user", parts: [{ type: "text", text: "hi" }] }];
+    await expect(
+      ctorArg.prepareSendMessagesRequest({ messages }),
+    ).rejects.toThrow("Authentication failed");
+  });
+});
+
+describe("useBuilderChatPanel – handleKeyDown empty input guard", () => {
+  it("does NOT call sendMessage on Enter when inputValue is empty", async () => {
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-empty" },
+    });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+
+    const mockPreventDefault = vi.fn();
+    act(() => {
+      result.current.handleKeyDown({
+        key: "Enter",
+        shiftKey: false,
+        preventDefault: mockPreventDefault,
+      } as unknown as import("react").KeyboardEvent<HTMLTextAreaElement>);
+    });
+
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("useBuilderChatPanel – inputValue resets on flowID change", () => {
+  it("clears inputValue when flowID changes", () => {
+    mockFlowID = "flow-a";
+    const { result, rerender } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.setInputValue("typed text");
+    });
+    expect(result.current.inputValue).toBe("typed text");
+
+    mockFlowID = "flow-b";
+    rerender();
+
+    expect(result.current.inputValue).toBe("");
   });
 });

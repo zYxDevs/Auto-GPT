@@ -7,8 +7,6 @@ const MAX_NODES = 100;
 const MAX_EDGES = 200;
 /** Maximum characters of a node description included in the seed prompt. */
 const MAX_DESC_CHARS = 500;
-/** Matches fenced JSON code blocks in AI responses. Module-scoped to avoid recompilation. */
-const JSON_BLOCK_REGEX = /```(?:json)?\s*\n?([\s\S]*?)\n?```/g;
 
 /** Escapes XML special characters in user-controlled strings before embedding in prompts. */
 function sanitizeForXml(s: string): string {
@@ -64,7 +62,7 @@ export function serializeGraphForChat(
     const name = sanitizeForXml(getNodeDisplayName(n, ""));
     const rawDesc = n.data.description?.slice(0, MAX_DESC_CHARS) ?? "";
     const desc = rawDesc ? ` — ${sanitizeForXml(rawDesc)}` : "";
-    return `- Node ${n.id}: "${name}"${desc}`;
+    return `- Node ${sanitizeForXml(n.id)}: "${name}"${desc}`;
   });
 
   const truncationNote =
@@ -82,7 +80,7 @@ export function serializeGraphForChat(
     const tgtName = sanitizeForXml(
       getNodeDisplayName(nodeMap.get(e.target), e.target),
     );
-    return `- "${srcName}" (${e.sourceHandle}) → "${tgtName}" (${e.targetHandle})`;
+    return `- "${srcName}" (${sanitizeForXml(e.sourceHandle ?? "")}) → "${tgtName}" (${sanitizeForXml(e.targetHandle ?? "")})`;
   });
 
   const edgeTruncationNote =
@@ -168,7 +166,10 @@ export function extractTextFromParts(
   parts: ReadonlyArray<{ type: string; text?: string }> | null | undefined,
 ): string {
   return (parts ?? [])
-    .filter((p): p is { type: "text"; text: string } => p.type === "text")
+    .filter(
+      (p): p is { type: "text"; text: string } =>
+        p.type === "text" && typeof p.text === "string",
+    )
     .map((p) => p.text)
     .join("");
 }
@@ -186,10 +187,10 @@ export function extractTextFromParts(
  */
 export function parseGraphActions(text: string): GraphAction[] {
   const actions: GraphAction[] = [];
-  JSON_BLOCK_REGEX.lastIndex = 0;
+  const jsonBlockRegex = /```(?:json)?\s*\n?([\s\S]*?)\n?```/g;
   let match: RegExpExecArray | null;
 
-  while ((match = JSON_BLOCK_REGEX.exec(text)) !== null) {
+  while ((match = jsonBlockRegex.exec(text)) !== null) {
     try {
       const parsed = JSON.parse(match[1]) as unknown;
       if (
