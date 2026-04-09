@@ -32,9 +32,9 @@ from backend.blocks.llm import (
     AITextSummarizerBlock,
     LlmModel,
 )
+from backend.blocks.orchestrator import OrchestratorBlock
 from backend.blocks.replicate.flux_advanced import ReplicateFluxAdvancedModelBlock
 from backend.blocks.replicate.replicate_block import ReplicateModelBlock
-from backend.blocks.smart_decision_maker import SmartDecisionMakerBlock
 from backend.blocks.talking_head import CreateTalkingAvatarVideoBlock
 from backend.blocks.text_to_speech_block import UnrealTextToSpeechBlock
 from backend.blocks.video.narration import VideoNarrationBlock
@@ -76,7 +76,6 @@ MODEL_COST: dict[LlmModel, int] = {
     LlmModel.GPT4O_MINI: 1,
     LlmModel.GPT4O: 3,
     LlmModel.GPT4_TURBO: 10,
-    LlmModel.GPT3_5_TURBO: 1,
     LlmModel.CLAUDE_4_1_OPUS: 21,
     LlmModel.CLAUDE_4_OPUS: 21,
     LlmModel.CLAUDE_4_SONNET: 5,
@@ -148,6 +147,19 @@ MODEL_COST: dict[LlmModel, int] = {
     LlmModel.KIMI_K2: 1,
     LlmModel.QWEN3_235B_A22B_THINKING: 1,
     LlmModel.QWEN3_CODER: 9,
+    # Z.ai (Zhipu) models
+    LlmModel.ZAI_GLM_4_32B: 1,
+    LlmModel.ZAI_GLM_4_5: 2,
+    LlmModel.ZAI_GLM_4_5_AIR: 1,
+    LlmModel.ZAI_GLM_4_5_AIR_FREE: 1,
+    LlmModel.ZAI_GLM_4_5V: 2,
+    LlmModel.ZAI_GLM_4_6: 1,
+    LlmModel.ZAI_GLM_4_6V: 1,
+    LlmModel.ZAI_GLM_4_7: 1,
+    LlmModel.ZAI_GLM_4_7_FLASH: 1,
+    LlmModel.ZAI_GLM_5: 2,
+    LlmModel.ZAI_GLM_5_TURBO: 4,
+    LlmModel.ZAI_GLM_5V_TURBO: 4,
     # v0 by Vercel models
     LlmModel.V0_1_5_MD: 1,
     LlmModel.V0_1_5_LG: 2,
@@ -549,7 +561,6 @@ BLOCK_COSTS: dict[Type[Block], list[BlockCost]] = {
             },
         )
     ],
-    SmartDecisionMakerBlock: LLM_COST,
     SearchOrganizationsBlock: [
         BlockCost(
             cost_amount=2,
@@ -701,6 +712,7 @@ BLOCK_COSTS: dict[Type[Block], list[BlockCost]] = {
             },
         ),
     ],
+    OrchestratorBlock: LLM_COST,
     VideoNarrationBlock: [
         BlockCost(
             cost_amount=5,  # ElevenLabs TTS cost

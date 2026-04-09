@@ -43,10 +43,8 @@ class GetAgentBuildingGuideTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Returns the complete guide for building agent JSON graphs, including "
-            "block IDs, link structure, AgentInputBlock, AgentOutputBlock, "
-            "AgentExecutorBlock (for sub-agent composition), and MCPToolBlock usage. "
-            "Call this before generating agent JSON to ensure correct structure."
+            "Get the agent JSON building guide (nodes, links, AgentExecutorBlock, MCPToolBlock usage, "
+            "and the create->dry-run->fix iterative workflow). Call before generating agent JSON."
         )
 
     @property
@@ -65,7 +63,7 @@ class GetAgentBuildingGuideTool(BaseTool):
         self,
         user_id: str | None,
         session: ChatSession,
-        **kwargs,
+        **kwargs,  # no tool-specific params; accepts kwargs for forward-compat
     ) -> ToolResponseBase:
         session_id = session.session_id if session else None
         try:

@@ -1,13 +1,17 @@
-import { useDeleteV1DeleteCredentials } from "@/app/api/__generated__/endpoints/integrations/integrations";
 import useCredentials from "@/hooks/useCredentials";
 import { useBackendAPI } from "@/lib/autogpt-server-api/context";
 import {
   BlockIOCredentialsSubSchema,
   CredentialsMetaInput,
 } from "@/lib/autogpt-server-api/types";
+import { toast } from "@/components/molecules/Toast/use-toast";
 import { postV2InitiateOauthLoginForAnMcpServer } from "@/app/api/__generated__/endpoints/mcp/mcp";
-import { openOAuthPopup } from "@/lib/oauth-popup";
-import { useQueryClient } from "@tanstack/react-query";
+import {
+  OAUTH_ERROR_FLOW_CANCELED,
+  OAUTH_ERROR_FLOW_TIMED_OUT,
+  OAUTH_ERROR_WINDOW_CLOSED,
+  openOAuthPopup,
+} from "@/lib/oauth-popup";
 import { useEffect, useRef, useState } from "react";
 import {
   countSupportedTypes,
@@ -15,6 +19,8 @@ import {
   getActionButtonText,
   getSupportedTypes,
   getSystemCredentials,
+  processCredentialDeletion,
+  resolveActionTarget,
 } from "./helpers";
 
 export type CredentialsInputState = ReturnType<typeof useCredentialsInput>;
@@ -49,19 +55,20 @@ export function useCredentialsInput({
   const [isCredentialTypeSelectorOpen, setCredentialTypeSelectorOpen] =
     useState(false);
   const [isOAuth2FlowInProgress, setOAuth2FlowInProgress] = useState(false);
-  const [oAuthPopupController, setOAuthPopupController] =
-    useState<AbortController | null>(null);
   const [oAuthError, setOAuthError] = useState<string | null>(null);
   const [credentialToDelete, setCredentialToDelete] = useState<{
     id: string;
     title: string;
   } | null>(null);
+  const [deleteWarningMessage, setDeleteWarningMessage] = useState<
+    string | null
+  >(null);
 
   const api = useBackendAPI();
-  const queryClient = useQueryClient();
   const credentials = useCredentials(schema, siblingInputs);
   const hasAttemptedAutoSelect = useRef(false);
   const oauthAbortRef = useRef<((reason?: string) => void) | null>(null);
+  const [isDeletingCredential, setIsDeletingCredential] = useState(false);
 
   // Clean up on unmount
   useEffect(() => {
@@ -69,23 +76,6 @@ export function useCredentialsInput({
       oauthAbortRef.current?.();
     };
   }, []);
-
-  const deleteCredentialsMutation = useDeleteV1DeleteCredentials({
-    mutation: {
-      onSuccess: () => {
-        queryClient.invalidateQueries({
-          queryKey: ["/api/integrations/credentials"],
-        });
-        queryClient.invalidateQueries({
-          queryKey: [`/api/integrations/${credentials?.provider}/credentials`],
-        });
-        setCredentialToDelete(null);
-        if (selectedCredential?.id === credentialToDelete?.id) {
-          onSelectCredential(undefined);
-        }
-      },
-    },
-  });
 
   useEffect(() => {
     if (onLoaded) {
@@ -212,12 +202,6 @@ export function useCredentialsInput({
       });
 
       oauthAbortRef.current = cleanup.abort;
-      // Expose abort signal for the waiting modal's cancel button
-      const controller = new AbortController();
-      cleanup.signal.addEventListener("abort", () =>
-        controller.abort("completed"),
-      );
-      setOAuthPopupController(controller);
 
       const result = await promise;
 
@@ -252,14 +236,16 @@ export function useCredentialsInput({
         provider,
       });
     } catch (error) {
-      if (error instanceof Error && error.message === "OAuth flow timed out") {
-        setOAuthError("OAuth flow timed out");
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        message === OAUTH_ERROR_WINDOW_CLOSED ||
+        message === OAUTH_ERROR_FLOW_CANCELED
+      ) {
+        // User closed the popup or clicked cancel — not an error
+      } else if (message === OAUTH_ERROR_FLOW_TIMED_OUT) {
+        setOAuthError(OAUTH_ERROR_FLOW_TIMED_OUT);
       } else {
-        setOAuthError(
-          `OAuth error: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
+        setOAuthError(`OAuth error: ${message}`);
       }
     } finally {
       setOAuth2FlowInProgress(false);
@@ -283,19 +269,29 @@ export function useCredentialsInput({
   );
 
   function handleActionButtonClick() {
-    if (hasMultipleCredentialTypes) {
-      setCredentialTypeSelectorOpen(true);
-      return;
-    }
-
-    if (supportsOAuth2) {
-      handleOAuthLogin();
-    } else if (supportsApiKey) {
-      setAPICredentialsModalOpen(true);
-    } else if (supportsUserPassword) {
-      setUserPasswordCredentialsModalOpen(true);
-    } else if (supportsHostScoped) {
-      setHostScopedCredentialsModalOpen(true);
+    const target = resolveActionTarget(
+      hasMultipleCredentialTypes,
+      supportsOAuth2,
+      supportsApiKey,
+      supportsUserPassword,
+      supportsHostScoped,
+    );
+    switch (target) {
+      case "type_selector":
+        setCredentialTypeSelectorOpen(true);
+        break;
+      case "oauth":
+        handleOAuthLogin();
+        break;
+      case "api_key":
+        setAPICredentialsModalOpen(true);
+        break;
+      case "user_password":
+        setUserPasswordCredentialsModalOpen(true);
+        break;
+      case "host_scoped":
+        setHostScopedCredentialsModalOpen(true);
+        break;
     }
   }
 
@@ -311,16 +307,47 @@ export function useCredentialsInput({
     }
   }
 
+  function cancelOAuthFlow() {
+    oauthAbortRef.current?.("canceled");
+  }
+
   function handleDeleteCredential(credential: { id: string; title: string }) {
+    setDeleteWarningMessage(null);
     setCredentialToDelete(credential);
   }
 
-  function handleDeleteConfirm() {
-    if (credentialToDelete && credentials) {
-      deleteCredentialsMutation.mutate({
-        provider: credentials.provider,
-        credId: credentialToDelete.id,
+  async function handleDeleteConfirm(force: boolean = false) {
+    if (
+      !credentialToDelete ||
+      !credentials ||
+      !("deleteCredentials" in credentials)
+    )
+      return;
+
+    setIsDeletingCredential(true);
+    try {
+      const state = await processCredentialDeletion(
+        credentialToDelete,
+        selectedCredential?.id,
+        credentials.deleteCredentials,
+        force,
+      );
+
+      if (state.shouldUnselectCurrent) {
+        onSelectCredential(undefined);
+      }
+      setDeleteWarningMessage(state.warningMessage);
+      setCredentialToDelete(state.credentialToDelete);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Something went wrong";
+      toast({
+        title: "Failed to delete credential",
+        description: message,
+        variant: "destructive",
       });
+    } finally {
+      setIsDeletingCredential(false);
     }
   }
 
@@ -345,9 +372,10 @@ export function useCredentialsInput({
     isHostScopedCredentialsModalOpen,
     isCredentialTypeSelectorOpen,
     isOAuth2FlowInProgress,
-    oAuthPopupController,
+    cancelOAuthFlow,
     credentialToDelete,
-    deleteCredentialsMutation,
+    deleteWarningMessage,
+    isDeletingCredential,
     actionButtonText: getActionButtonText(
       supportsOAuth2,
       supportsApiKey,
