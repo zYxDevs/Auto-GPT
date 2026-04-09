@@ -299,6 +299,40 @@ async def test_sync_subscription_from_stripe_business_tier():
 
 
 @pytest.mark.asyncio
+async def test_get_subscription_price_id_pro():
+    from backend.data.credit import get_subscription_price_id
+
+    with patch(
+        "backend.data.credit.get_feature_flag_value",
+        new_callable=AsyncMock,
+        return_value="price_pro_monthly",
+    ):
+        price_id = await get_subscription_price_id(SubscriptionTier.PRO)
+        assert price_id == "price_pro_monthly"
+
+
+@pytest.mark.asyncio
+async def test_get_subscription_price_id_free_returns_none():
+    from backend.data.credit import get_subscription_price_id
+
+    price_id = await get_subscription_price_id(SubscriptionTier.FREE)
+    assert price_id is None
+
+
+@pytest.mark.asyncio
+async def test_get_subscription_price_id_empty_flag_returns_none():
+    from backend.data.credit import get_subscription_price_id
+
+    with patch(
+        "backend.data.credit.get_feature_flag_value",
+        new_callable=AsyncMock,
+        return_value="",  # LD flag not set
+    ):
+        price_id = await get_subscription_price_id(SubscriptionTier.BUSINESS)
+        assert price_id is None
+
+
+@pytest.mark.asyncio
 async def test_cancel_stripe_subscription_handles_stripe_error():
     """Stripe errors during cancellation should be logged, not raised."""
     import stripe as stripe_mod
