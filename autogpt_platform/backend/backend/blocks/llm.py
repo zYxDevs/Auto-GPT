@@ -1450,7 +1450,7 @@ class AIStructuredResponseGeneratorBlock(AIBlockBase):
 
         error_feedback_message = ""
         llm_model = input_data.model
-        last_attempt_cost: float | None = None
+        total_provider_cost: float | None = None
 
         for retry_count in range(input_data.retry):
             logger.debug(f"LLM request: {prompt}")
@@ -1468,9 +1468,8 @@ class AIStructuredResponseGeneratorBlock(AIBlockBase):
                     max_tokens=input_data.max_tokens,
                 )
                 response_text = llm_response.response
-                # Merge token counts for every attempt (each call costs tokens).
-                # provider_cost (actual USD) is tracked separately and only merged
-                # on success to avoid double-counting across retries.
+                # Accumulate token counts and provider_cost for every attempt
+                # (each call costs tokens and USD, regardless of validation outcome).
                 token_stats = NodeExecutionStats(
                     input_token_count=llm_response.prompt_tokens,
                     output_token_count=llm_response.completion_tokens,
@@ -1478,7 +1477,10 @@ class AIStructuredResponseGeneratorBlock(AIBlockBase):
                     cache_creation_token_count=llm_response.cache_creation_tokens,
                 )
                 self.merge_stats(token_stats)
-                last_attempt_cost = llm_response.provider_cost
+                if llm_response.provider_cost is not None:
+                    total_provider_cost = (
+                        total_provider_cost or 0.0
+                    ) + llm_response.provider_cost
                 logger.debug(f"LLM attempt-{retry_count} response: {response_text}")
 
                 if input_data.expected_format:
@@ -1547,7 +1549,7 @@ class AIStructuredResponseGeneratorBlock(AIBlockBase):
                             NodeExecutionStats(
                                 llm_call_count=retry_count + 1,
                                 llm_retry_count=retry_count,
-                                provider_cost=last_attempt_cost,
+                                provider_cost=total_provider_cost,
                             )
                         )
                         yield "response", response_obj
@@ -1568,7 +1570,7 @@ class AIStructuredResponseGeneratorBlock(AIBlockBase):
                         NodeExecutionStats(
                             llm_call_count=retry_count + 1,
                             llm_retry_count=retry_count,
-                            provider_cost=last_attempt_cost,
+                            provider_cost=total_provider_cost,
                         )
                     )
                     yield "response", {"response": response_text}
