@@ -1223,7 +1223,7 @@ class TestAnthropicCacheControl:
 
     @pytest.mark.asyncio
     async def test_no_tools_no_cache_control_on_tools(self):
-        """When there are no tools, the Anthropic call receives anthropic.omit for tools."""
+        """When there are no tools, the Anthropic call receives anthropic.NOT_GIVEN for tools."""
         mock_resp = MagicMock()
         mock_resp.content = [MagicMock(type="text", text="ok")]
         mock_resp.usage = MagicMock(input_tokens=5, output_tokens=2)
