@@ -223,9 +223,10 @@ async def get_platform_cost_dashboard(
         start = datetime.now(timezone.utc) - timedelta(days=DEFAULT_DASHBOARD_DAYS)
     where_p, params_p = _build_where(start, end, provider, user_id, "p")
 
-    by_provider_rows, by_user_rows, total_user_rows = await asyncio.gather(
-        query_raw_with_schema(
-            f"""
+    by_provider_rows, by_user_rows, total_user_rows, total_agg_rows = (
+        await asyncio.gather(
+            query_raw_with_schema(
+                f"""
             SELECT
                 p."provider",
                 p."trackingType" AS tracking_type,
@@ -244,10 +245,10 @@ async def get_platform_cost_dashboard(
             ORDER BY total_cost DESC
             LIMIT {MAX_PROVIDER_ROWS}
             """,
-            *params_p,
-        ),
-        query_raw_with_schema(
-            f"""
+                *params_p,
+            ),
+            query_raw_with_schema(
+                f"""
             SELECT
                 p."userId" AS user_id,
                 u."email",
@@ -262,23 +263,38 @@ async def get_platform_cost_dashboard(
             ORDER BY total_cost DESC
             LIMIT {MAX_USER_ROWS}
             """,
-            *params_p,
-        ),
-        query_raw_with_schema(
-            f"""
+                *params_p,
+            ),
+            query_raw_with_schema(
+                f"""
             SELECT COUNT(DISTINCT p."userId")::bigint AS cnt
             FROM {{schema_prefix}}"PlatformCostLog" p
             WHERE {where_p}
             """,
-            *params_p,
-        ),
+                *params_p,
+            ),
+            # Separate aggregate query so dashboard totals are never derived
+            # from the capped by_provider_rows list. With model-level grouping,
+            # MAX_PROVIDER_ROWS is hit more easily; summing the capped rows
+            # would silently undercount once >500 (provider, type, model) exist.
+            query_raw_with_schema(
+                f"""
+            SELECT
+                COALESCE(SUM(p."costMicrodollars"), 0)::bigint AS total_cost,
+                COUNT(*)::bigint AS request_count
+            FROM {{schema_prefix}}"PlatformCostLog" p
+            WHERE {where_p}
+            """,
+                *params_p,
+            ),
+        )
     )
 
     # Use the exact COUNT(DISTINCT userId) so total_users is not capped at
     # MAX_USER_ROWS (which would silently report 100 for >100 active users).
     total_users = int(total_user_rows[0]["cnt"]) if total_user_rows else 0
-    total_cost = sum(r["total_cost"] for r in by_provider_rows)
-    total_requests = sum(r["request_count"] for r in by_provider_rows)
+    total_cost = int(total_agg_rows[0]["total_cost"]) if total_agg_rows else 0
+    total_requests = int(total_agg_rows[0]["request_count"]) if total_agg_rows else 0
 
     return PlatformCostDashboard(
         by_provider=[
