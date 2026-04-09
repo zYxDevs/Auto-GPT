@@ -308,6 +308,7 @@ export function useBuilderChatPanel({
 
   // Close the panel on Escape when focus is inside the panel, so pressing Escape
   // in another dialog or canvas element does not accidentally close the chat panel.
+  // Skip when focus is in an editable element to avoid discarding a draft in progress.
   useEffect(() => {
     if (!isOpen) return;
     function onKeyDown(e: globalThis.KeyboardEvent) {
@@ -316,6 +317,13 @@ export function useBuilderChatPanel({
         panelRef &&
         panelRef.current &&
         !panelRef.current.contains(e.target as Node)
+      )
+        return;
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "INPUT" ||
+        target.isContentEditable
       )
         return;
       setIsOpen(false);
