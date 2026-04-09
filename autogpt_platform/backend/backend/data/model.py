@@ -21,7 +21,7 @@ from typing import (
 )
 from uuid import uuid4
 
-from prisma.enums import CreditTransactionType, OnboardingStep
+from prisma.enums import CreditTransactionType, OnboardingStep, SubscriptionTier
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -71,6 +71,9 @@ class User(BaseModel):
     stripe_customer_id: Optional[str] = Field(None, description="Stripe customer ID")
     top_up_config: Optional["AutoTopUpConfig"] = Field(
         None, description="Top up configuration"
+    )
+    subscription_tier: SubscriptionTier = Field(
+        default=SubscriptionTier.FREE, description="User subscription tier"
     )
 
     # Notification preferences
@@ -146,6 +149,7 @@ class User(BaseModel):
             integrations=prisma_user.integrations or "",
             stripe_customer_id=prisma_user.stripeCustomerId,
             top_up_config=top_up_config,
+            subscription_tier=prisma_user.subscriptionTier or SubscriptionTier.FREE,
             max_emails_per_day=prisma_user.maxEmailsPerDay or 3,
             notify_on_agent_run=prisma_user.notifyOnAgentRun or True,
             notify_on_zero_balance=prisma_user.notifyOnZeroBalance or True,

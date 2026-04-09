@@ -40,6 +40,8 @@ model User {
 
   timezone String @default("not-set")
 
+  subscriptionTier SubscriptionTier @default(FREE)
+
   // Relations
 
   AgentGraphs          AgentGraph[]
@@ -745,12 +747,20 @@ model AnalyticsMetrics {
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 
+enum SubscriptionTier {
+  FREE
+  PRO
+  BUSINESS
+  ENTERPRISE
+}
+
 enum CreditTransactionType {
   TOP_UP
   USAGE
   GRANT
   REFUND
   CARD_CHECK
+  SUBSCRIPTION
 }
 
 model CreditTransaction {

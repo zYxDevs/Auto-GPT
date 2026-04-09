@@ -113,8 +113,18 @@ async def check_rate_limit(
     This is acceptable because token-based limits are approximate by nature
     (the exact token count is unknown until after generation).
 
+    Also triggers lazy monthly subscription deduction (idempotent).
+
     Fails open: if Redis is unavailable, allows the request.
     """
+    # Lazy subscription deduction — idempotent, only writes once per month.
+    try:
+        from backend.data.credit import ensure_subscription_paid
+
+        await ensure_subscription_paid(user_id)
+    except Exception as e:
+        logger.warning(f"Subscription check failed for {user_id}: {e}")
+
     # Short-circuit: when both limits are 0 (unlimited) skip the Redis
     # round-trip entirely.
     if daily_token_limit <= 0 and weekly_token_limit <= 0:

@@ -1,7 +1,7 @@
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 import stripe
@@ -10,6 +10,7 @@ from prisma.enums import (
     CreditTransactionType,
     NotificationType,
     OnboardingStep,
+    SubscriptionTier,
 )
 from prisma.errors import UniqueViolationError
 from prisma.models import CreditRefundRequest, CreditTransaction, User, UserBalance
@@ -604,6 +605,8 @@ class UserCredit(UserCreditBase):
         if cost == 0:
             return 0
 
+        await ensure_subscription_paid(user_id)
+
         balance, _ = await self._add_transaction(
             user_id=user_id,
             amount=-cost,
@@ -1144,10 +1147,17 @@ class BetaUserCredit(UserCredit):
         if (snapshot_time.year, snapshot_time.month) == (cur_time.year, cur_time.month):
             return balance
 
+        # Include subscription cost in grant so the upcoming subscription deduction
+        # does not reduce the user's effective usage credits below num_user_credits_refill.
+        user = await get_user_by_id(user_id)
+        tier = user.subscription_tier or SubscriptionTier.FREE
+        sub_cost = await get_subscription_cost(user_id, tier)
+        target = self.num_user_credits_refill + sub_cost
+
         try:
             balance, _ = await self._add_transaction(
                 user_id=user_id,
-                amount=max(self.num_user_credits_refill - balance, 0),
+                amount=max(target - balance, 0),
                 transaction_type=CreditTransactionType.GRANT,
                 transaction_key=f"MONTHLY-CREDIT-TOP-UP-{cur_time}",
                 metadata=SafeJson({"reason": "Monthly credit refill"}),
@@ -1246,10 +1256,59 @@ async def get_stripe_customer_id(user_id: str) -> str:
 
 
 async def set_auto_top_up(user_id: str, config: AutoTopUpConfig):
+    user = await get_user_by_id(user_id)
+    tier = user.subscription_tier or SubscriptionTier.FREE
+    sub_cost = await get_subscription_cost(user_id, tier)
+    if sub_cost > 0 and config.amount < sub_cost:
+        raise ValueError(
+            f"Auto top-up amount must be at least {sub_cost} credits to maintain "
+            f"your {tier.value} subscription. Set amount >= {sub_cost} or downgrade to Free."
+        )
     await User.prisma().update(
         where={"id": user_id},
         data={"topUpConfig": SafeJson(config.model_dump())},
     )
+
+
+async def set_subscription_tier(user_id: str, tier: SubscriptionTier) -> None:
+    """
+    Upgrade or downgrade a user's subscription tier.
+
+    Upgrade: validates auto top-up is configured with amount >= subscription cost,
+    sets the tier immediately, and charges the first month's subscription.
+    Downgrade: sets the new tier immediately (takes effect on next monthly cycle).
+    No proration — full month is charged on upgrade.
+    """
+    current_user = await get_user_by_id(user_id)
+    current_tier = current_user.subscription_tier or SubscriptionTier.FREE
+
+    sub_cost = await get_subscription_cost(user_id, tier)
+
+    if sub_cost > 0:
+        auto_top_up = await get_auto_top_up(user_id)
+        if auto_top_up.amount < sub_cost:
+            raise ValueError(
+                f"Auto top-up must be configured with amount >= {sub_cost} credits "
+                f"before upgrading to {tier.value}. Current amount: {auto_top_up.amount}."
+            )
+
+    await User.prisma().update(
+        where={"id": user_id},
+        data={"subscriptionTier": tier},
+    )
+    get_user_by_id.cache_delete(user_id)  # type: ignore[attr-defined]
+
+    # Charge immediately on upgrade (full month, no proration).
+    # Downgrade resets cleanly on next monthly cycle.
+    tier_order = [
+        SubscriptionTier.FREE,
+        SubscriptionTier.PRO,
+        SubscriptionTier.BUSINESS,
+        SubscriptionTier.ENTERPRISE,
+    ]
+    is_upgrade = tier_order.index(tier) > tier_order.index(current_tier)
+    if is_upgrade and sub_cost > 0:
+        await ensure_subscription_paid(user_id)
 
 
 async def get_auto_top_up(user_id: str) -> AutoTopUpConfig:
@@ -1259,6 +1318,69 @@ async def get_auto_top_up(user_id: str) -> AutoTopUpConfig:
         return AutoTopUpConfig(threshold=0, amount=0)
 
     return AutoTopUpConfig.model_validate(user.top_up_config)
+
+
+async def get_subscription_cost(user_id: str, tier: SubscriptionTier) -> int:
+    """Return monthly subscription cost in credits from LD. 0 = free or disabled."""
+    from backend.util.feature_flag import get_feature_flag_value
+
+    flag_map = {
+        SubscriptionTier.PRO: Flag.SUBSCRIPTION_COST_PRO,
+        SubscriptionTier.BUSINESS: Flag.SUBSCRIPTION_COST_BUSINESS,
+    }
+    flag = flag_map.get(tier)
+    if flag is None:
+        return 0
+
+    cost = await get_feature_flag_value(flag.value, user_id, default=0)
+    return int(cost) if isinstance(cost, (int, float)) else 0
+
+
+async def ensure_subscription_paid(user_id: str) -> None:
+    """
+    Lazy monthly subscription deduction. Idempotent — safe to call from
+    spend_credits() and rate-limit checks. Triggers auto top-up when balance
+    drops below threshold after deduction.
+
+    On auto top-up failure: logs only (grace period). Does not downgrade tier.
+    """
+    user = await get_user_by_id(user_id)
+    tier = user.subscription_tier or SubscriptionTier.FREE
+    sub_cost = await get_subscription_cost(user_id, tier)
+    if sub_cost == 0:
+        return
+
+    cur_month = datetime.now(UTC).strftime("%Y-%m")
+    key = f"SUBSCRIPTION-{user_id}-{cur_month}"
+
+    credit = UserCredit()
+    try:
+        balance, _ = await credit._add_transaction(
+            user_id=user_id,
+            amount=-sub_cost,
+            transaction_type=CreditTransactionType.SUBSCRIPTION,
+            transaction_key=key,
+            fail_insufficient_credits=False,
+            metadata=SafeJson({"reason": f"Monthly {tier.value} subscription"}),
+        )
+    except UniqueViolationError:
+        return  # already paid this month
+
+    auto_top_up = await get_auto_top_up(user_id)
+    if auto_top_up.threshold and balance < auto_top_up.threshold:
+        try:
+            await credit._top_up_credits(
+                user_id=user_id,
+                amount=auto_top_up.amount,
+                key=f"AUTO-TOP-UP-SUB-{user_id}-{cur_month}",
+                ceiling_balance=auto_top_up.threshold,
+                top_up_type=TopUpType.AUTO,
+            )
+        except Exception as e:
+            logger.error(
+                f"Auto top-up failed during subscription deduction for {user_id}: {e}. "
+                f"Balance: {balance}, subscription cost: {sub_cost}."
+            )
 
 
 async def admin_get_user_history(

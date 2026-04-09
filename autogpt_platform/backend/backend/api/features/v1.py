@@ -51,8 +51,10 @@ from backend.data.credit import (
     TransactionHistory,
     UserCredit,
     get_auto_top_up,
+    get_subscription_cost,
     get_user_credit_model,
     set_auto_top_up,
+    set_subscription_tier,
 )
 from backend.data.graph import GraphSettings
 from backend.data.model import CredentialsMetaInput, UserOnboarding
@@ -626,9 +628,12 @@ async def configure_user_auto_top_up(
             raise HTTPException(status_code=422, detail=str(e))
         raise
 
-    await set_auto_top_up(
-        user_id, AutoTopUpConfig(threshold=request.threshold, amount=request.amount)
-    )
+    try:
+        await set_auto_top_up(
+            user_id, AutoTopUpConfig(threshold=request.threshold, amount=request.amount)
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     return "Auto top-up settings updated"
 
 
@@ -642,6 +647,80 @@ async def get_user_auto_top_up(
     user_id: Annotated[str, Security(get_user_id)],
 ) -> AutoTopUpConfig:
     return await get_auto_top_up(user_id)
+
+
+class SubscriptionTierRequest(BaseModel):
+    tier: str
+
+
+class SubscriptionStatusResponse(BaseModel):
+    tier: str
+    monthly_cost: int
+    tier_costs: dict[str, int]
+
+
+@v1_router.get(
+    path="/credits/subscription",
+    summary="Get subscription tier, current cost, and all tier costs",
+    tags=["credits"],
+    dependencies=[Security(requires_user)],
+)
+async def get_subscription_status(
+    user_id: Annotated[str, Security(get_user_id)],
+) -> SubscriptionStatusResponse:
+    from prisma.enums import SubscriptionTier
+
+    from backend.data.user import get_user_by_id
+
+    user = await get_user_by_id(user_id)
+    tier = user.subscription_tier or SubscriptionTier.FREE
+    cost = await get_subscription_cost(user_id, tier)
+    pro_cost, biz_cost = await asyncio.gather(
+        get_subscription_cost(user_id, SubscriptionTier.PRO),
+        get_subscription_cost(user_id, SubscriptionTier.BUSINESS),
+    )
+    return SubscriptionStatusResponse(
+        tier=tier.value,
+        monthly_cost=cost,
+        tier_costs={"FREE": 0, "PRO": pro_cost, "BUSINESS": biz_cost, "ENTERPRISE": 0},
+    )
+
+
+@v1_router.post(
+    path="/credits/subscription",
+    summary="Upgrade or downgrade subscription tier",
+    tags=["credits"],
+    dependencies=[Security(requires_user)],
+)
+async def update_subscription_tier(
+    request: SubscriptionTierRequest,
+    user_id: Annotated[str, Security(get_user_id)],
+) -> SubscriptionStatusResponse:
+    from prisma.enums import SubscriptionTier
+
+    try:
+        tier = SubscriptionTier(request.tier.upper())
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid tier '{request.tier}'. Valid values: {[t.value for t in SubscriptionTier]}",
+        )
+
+    try:
+        await set_subscription_tier(user_id, tier)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    cost, pro_cost, biz_cost = await asyncio.gather(
+        get_subscription_cost(user_id, tier),
+        get_subscription_cost(user_id, SubscriptionTier.PRO),
+        get_subscription_cost(user_id, SubscriptionTier.BUSINESS),
+    )
+    return SubscriptionStatusResponse(
+        tier=tier.value,
+        monthly_cost=cost,
+        tier_costs={"FREE": 0, "PRO": pro_cost, "BUSINESS": biz_cost, "ENTERPRISE": 0},
+    )
 
 
 @v1_router.post(

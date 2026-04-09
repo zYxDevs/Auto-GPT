@@ -194,6 +194,22 @@ export default class BackendAPI {
     return this._request("PATCH", "/credits");
   }
 
+  getSubscription(): Promise<{
+    tier: string;
+    monthly_cost: number;
+    tier_costs: Record<string, number>;
+  }> {
+    return this._get("/credits/subscription");
+  }
+
+  setSubscriptionTier(tier: string): Promise<{
+    tier: string;
+    monthly_cost: number;
+    tier_costs: Record<string, number>;
+  }> {
+    return this._request("POST", "/credits/subscription", { tier });
+  }
+
   ////////////////////////////////////////
   //////////////// GRAPHS ////////////////
   ////////////////////////////////////////

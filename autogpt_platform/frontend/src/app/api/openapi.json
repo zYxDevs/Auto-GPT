@@ -1785,6 +1785,68 @@
         }
       }
     },
+    "/api/credits/subscription": {
+      "get": {
+        "tags": ["v1", "credits"],
+        "summary": "Get subscription tier, current cost, and all tier costs",
+        "operationId": "getV1Get subscription tier, current cost, and all tier costs",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/HTTP401NotAuthenticatedError"
+          }
+        },
+        "security": [{ "HTTPBearerJWT": [] }]
+      },
+      "post": {
+        "tags": ["v1", "credits"],
+        "summary": "Upgrade or downgrade subscription tier",
+        "operationId": "postV1Upgrade or downgrade subscription tier",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionTierRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/HTTP401NotAuthenticatedError"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        },
+        "security": [{ "HTTPBearerJWT": [] }]
+      }
+    },
     "/api/credits/transactions": {
       "get": {
         "tags": ["v1", "credits"],
@@ -8617,7 +8679,14 @@
       },
       "CreditTransactionType": {
         "type": "string",
-        "enum": ["TOP_UP", "USAGE", "GRANT", "REFUND", "CARD_CHECK"],
+        "enum": [
+          "TOP_UP",
+          "USAGE",
+          "GRANT",
+          "REFUND",
+          "CARD_CHECK",
+          "SUBSCRIPTION"
+        ],
         "title": "CreditTransactionType"
       },
       "DeleteFileResponse": {
@@ -12831,6 +12900,26 @@
         "type": "string",
         "enum": ["DRAFT", "PENDING", "APPROVED", "REJECTED"],
         "title": "SubmissionStatus"
+      },
+      "SubscriptionStatusResponse": {
+        "properties": {
+          "tier": { "type": "string", "title": "Tier" },
+          "monthly_cost": { "type": "integer", "title": "Monthly Cost" },
+          "tier_costs": {
+            "additionalProperties": { "type": "integer" },
+            "type": "object",
+            "title": "Tier Costs"
+          }
+        },
+        "type": "object",
+        "required": ["tier", "monthly_cost", "tier_costs"],
+        "title": "SubscriptionStatusResponse"
+      },
+      "SubscriptionTierRequest": {
+        "properties": { "tier": { "type": "string", "title": "Tier" } },
+        "type": "object",
+        "required": ["tier"],
+        "title": "SubscriptionTierRequest"
       },
       "SuggestedGoalResponse": {
         "properties": {
