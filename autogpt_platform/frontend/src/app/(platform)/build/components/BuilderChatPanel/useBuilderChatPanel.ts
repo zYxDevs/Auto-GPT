@@ -122,8 +122,10 @@ export function useBuilderChatPanel({
   const setEdges = useEdgeStore((s) => s.setEdges);
 
   // When the user navigates to a different graph: restore the cached session for
-  // that graph (preserving conversation history) and reset per-session UI state.
-  // Messages are only cleared when there is no prior session for the new graph.
+  // that graph (preserving the backend session) and reset all per-session UI state.
+  // Messages are always cleared on navigation — appliedActionKeys cannot be persisted
+  // so restoring messages while resetting action state would show previously applied
+  // actions as unapplied, allowing them to be re-applied and creating duplicate undo entries.
   useEffect(() => {
     const cachedSessionId = flowID
       ? (graphSessionCache.get(flowID) ?? null)
@@ -136,9 +138,7 @@ export function useBuilderChatPanel({
     isCreatingSessionRef.current = false;
     processedToolCallsRef.current = new Set();
     hasSentSeedMessageRef.current = false;
-    if (!cachedSessionId) {
-      setMessages([]);
-    }
+    setMessages([]);
     // setMessages is a stable function from useChat; excluding from deps is safe.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flowID]);

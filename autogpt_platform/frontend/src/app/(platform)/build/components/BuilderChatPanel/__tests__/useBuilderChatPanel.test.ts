@@ -359,6 +359,39 @@ describe("useBuilderChatPanel – flowID reset", () => {
 
     expect(result.current.sessionError).toBe(false);
   });
+
+  it("always clears messages on flowID change even when a cached session exists (prevents applied/unapplied mismatch)", async () => {
+    mockPostV2CreateSession.mockResolvedValue({
+      status: 200,
+      data: { id: "sess-cached" },
+    });
+    mockFlowID = "flow-1";
+
+    const { result, rerender } = renderHook(() => useBuilderChatPanel());
+
+    await openAndFlush(() => result.current.handleToggle());
+    expect(result.current.sessionId).toBe("sess-cached");
+
+    // Simulate chat messages from the first session
+    mockChatMessages = [
+      {
+        id: "msg-1",
+        role: "assistant",
+        parts: [{ type: "text", text: "Hello from session 1" }],
+      },
+    ];
+    mockSetMessages.mockClear();
+
+    // Navigate away and back to the same graph — cached session should be restored
+    // but messages must be cleared to stay in sync with the reset appliedActionKeys
+    mockFlowID = "flow-2";
+    rerender();
+    mockFlowID = "flow-1";
+    rerender();
+
+    // setMessages([]) must be called unconditionally regardless of cached session
+    expect(mockSetMessages).toHaveBeenCalledWith([]);
+  });
 });
 
 describe("useBuilderChatPanel – apply does not trigger cache refetch", () => {
