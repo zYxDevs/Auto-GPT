@@ -47,7 +47,13 @@ def _make_input(**overrides) -> AIConditionBlock.Input:
     return AIConditionBlock.Input(**defaults)
 
 
-def _mock_llm_response(response_text: str) -> LLMResponse:
+def _mock_llm_response(
+    response_text: str,
+    *,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+    provider_cost: float | None = None,
+) -> LLMResponse:
     return LLMResponse(
         raw_response="",
         prompt=[],
@@ -56,6 +62,9 @@ def _mock_llm_response(response_text: str) -> LLMResponse:
         prompt_tokens=10,
         completion_tokens=5,
         reasoning=None,
+        cache_read_tokens=cache_read_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        provider_cost=provider_cost,
     )
 
 
@@ -145,3 +154,33 @@ class TestExceptionPropagation:
         input_data = _make_input()
         with pytest.raises(RuntimeError, match="LLM provider error"):
             await _collect_outputs(block, input_data, credentials=TEST_CREDENTIALS)
+
+
+# ---------------------------------------------------------------------------
+# Regression: cache tokens and provider_cost must be propagated to stats
+# ---------------------------------------------------------------------------
+
+
+class TestCacheTokenPropagation:
+    @pytest.mark.asyncio
+    async def test_cache_tokens_propagated_to_stats(self):
+        """cache_read_tokens and cache_creation_tokens must be forwarded to
+        NodeExecutionStats so that usage dashboards count cached tokens."""
+        block = AIConditionBlock()
+
+        async def spy_llm(**kwargs):
+            return _mock_llm_response(
+                "true",
+                cache_read_tokens=7,
+                cache_creation_tokens=3,
+                provider_cost=0.0012,
+            )
+
+        block.llm_call = spy_llm  # type: ignore[assignment]
+
+        input_data = _make_input()
+        await _collect_outputs(block, input_data, credentials=TEST_CREDENTIALS)
+
+        assert block.execution_stats.cache_read_token_count == 7
+        assert block.execution_stats.cache_creation_token_count == 3
+        assert block.execution_stats.provider_cost == 0.0012
