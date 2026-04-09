@@ -23,10 +23,16 @@ import { useBuilderChatPanel } from "./useBuilderChatPanel";
 
 interface Props {
   className?: string;
+  isGraphLoaded?: boolean;
   onGraphEdited?: () => void;
 }
 
-export function BuilderChatPanel({ className, onGraphEdited }: Props) {
+export function BuilderChatPanel({
+  className,
+  isGraphLoaded,
+  onGraphEdited,
+}: Props) {
+  const panelRef = useRef<HTMLDivElement>(null);
   const {
     isOpen,
     handleToggle,
@@ -48,7 +54,7 @@ export function BuilderChatPanel({ className, onGraphEdited }: Props) {
     handleKeyDown,
     isStreaming,
     canSend,
-  } = useBuilderChatPanel({ onGraphEdited });
+  } = useBuilderChatPanel({ isGraphLoaded, onGraphEdited, panelRef });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -73,6 +79,7 @@ export function BuilderChatPanel({ className, onGraphEdited }: Props) {
     >
       {isOpen && (
         <div
+          ref={panelRef}
           role="complementary"
           aria-label="Builder chat panel"
           className="pointer-events-auto flex h-[70vh] w-96 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"

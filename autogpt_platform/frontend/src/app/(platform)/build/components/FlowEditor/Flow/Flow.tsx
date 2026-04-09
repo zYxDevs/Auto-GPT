@@ -139,7 +139,10 @@ export const Flow = () => {
         graphId={flowID || undefined}
       />
       {isBuilderChatEnabled && (
-        <BuilderChatPanel onGraphEdited={() => void refetchGraph()} />
+        <BuilderChatPanel
+          isGraphLoaded={isInitialLoadComplete}
+          onGraphEdited={() => void refetchGraph()}
+        />
       )}
     </div>
   );

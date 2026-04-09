@@ -341,13 +341,14 @@ describe("BuilderChatPanel", () => {
     expect(screen.queryByLabelText("Undo last applied change")).toBeNull();
   });
 
-  it("passes onGraphEdited to useBuilderChatPanel", () => {
+  it("passes onGraphEdited and isGraphLoaded to useBuilderChatPanel", () => {
     const onGraphEdited = vi.fn();
-    render(<BuilderChatPanel onGraphEdited={onGraphEdited} />);
-    expect(mockUseBuilderChatPanel).toHaveBeenCalledWith({
-      isGraphLoaded: undefined,
-      onGraphEdited,
-    });
+    render(
+      <BuilderChatPanel onGraphEdited={onGraphEdited} isGraphLoaded={true} />,
+    );
+    expect(mockUseBuilderChatPanel).toHaveBeenCalledWith(
+      expect.objectContaining({ isGraphLoaded: true, onGraphEdited }),
+    );
   });
 });
 

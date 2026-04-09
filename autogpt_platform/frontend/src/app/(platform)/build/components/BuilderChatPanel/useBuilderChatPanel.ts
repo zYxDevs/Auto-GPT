@@ -7,6 +7,7 @@ import { DefaultChatTransport } from "ai";
 import { MarkerType } from "@xyflow/react";
 import {
   type KeyboardEvent,
+  type RefObject,
   useEffect,
   useMemo,
   useRef,
@@ -53,6 +54,7 @@ export function clearGraphSessionCacheForTesting() {
 interface UseBuilderChatPanelArgs {
   isGraphLoaded?: boolean;
   onGraphEdited?: () => void;
+  panelRef?: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -75,6 +77,7 @@ interface UseBuilderChatPanelArgs {
 export function useBuilderChatPanel({
   isGraphLoaded = false,
   onGraphEdited,
+  panelRef,
 }: UseBuilderChatPanelArgs = {}) {
   const [isOpen, setIsOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -282,15 +285,23 @@ export function useBuilderChatPanel({
     }
   }, [messages, status, onGraphEdited, setQueryStates]);
 
-  // Close the panel on Escape so keyboard users can dismiss it quickly.
+  // Close the panel on Escape when focus is inside the panel, so pressing Escape
+  // in another dialog or canvas element does not accidentally close the chat panel.
   useEffect(() => {
     if (!isOpen) return;
     function onKeyDown(e: globalThis.KeyboardEvent) {
-      if (e.key === "Escape") setIsOpen(false);
+      if (e.key !== "Escape") return;
+      if (
+        panelRef &&
+        panelRef.current &&
+        !panelRef.current.contains(e.target as Node)
+      )
+        return;
+      setIsOpen(false);
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [isOpen]);
+  }, [isOpen, panelRef]);
 
   const isStreaming = status === "streaming" || status === "submitted";
   const canSend =
