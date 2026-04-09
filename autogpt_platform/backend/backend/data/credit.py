@@ -1343,17 +1343,21 @@ async def sync_subscription_from_stripe(stripe_subscription: dict) -> None:
             price_id = items[0].get("price", {}).get("id", "")
         pro_price = await get_subscription_price_id(SubscriptionTier.PRO)
         biz_price = await get_subscription_price_id(SubscriptionTier.BUSINESS)
-        if price_id and price_id == pro_price:
+        if price_id and pro_price and price_id == pro_price:
             tier = SubscriptionTier.PRO
-        elif price_id and price_id == biz_price:
+        elif price_id and biz_price and price_id == biz_price:
             tier = SubscriptionTier.BUSINESS
         else:
+            # Unknown or unconfigured price ID — log a warning and default to FREE
+            # to avoid leaving a paying user stuck on a stale tier if LD flags are
+            # misconfigured or the price ID has changed.
             logger.warning(
-                "sync_subscription_from_stripe: unknown price %s for customer %s",
+                "sync_subscription_from_stripe: unknown price %s for customer %s,"
+                " defaulting to FREE",
                 price_id,
                 customer_id,
             )
-            return
+            tier = SubscriptionTier.FREE
     else:
         tier = SubscriptionTier.FREE
     await set_subscription_tier(user.id, tier)
