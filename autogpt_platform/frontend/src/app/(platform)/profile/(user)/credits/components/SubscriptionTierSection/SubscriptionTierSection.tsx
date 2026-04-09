@@ -36,12 +36,29 @@ function formatCost(cents: number): string {
   return `$${(cents / 100).toFixed(2)}/mo`;
 }
 
-export function SubscriptionTierSection() {
-  const { subscription, isLoading, isPending, changeTier } =
-    useSubscriptionTierSection();
+interface Props {
+  autoTopUpConfig: { amount: number; threshold: number } | null;
+}
+
+export function SubscriptionTierSection({ autoTopUpConfig }: Props) {
+  const { subscription, isLoading, error, isPending, changeTier } =
+    useSubscriptionTierSection(autoTopUpConfig);
   const [tierError, setTierError] = useState<string | null>(null);
 
-  if (isLoading || !subscription) return null;
+  if (isLoading) return null;
+
+  if (error) {
+    return (
+      <div className="space-y-4">
+        <h3 className="text-lg font-medium">Subscription Plan</h3>
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400">
+          {error}
+        </p>
+      </div>
+    );
+  }
+
+  if (!subscription) return null;
 
   async function handleTierChange(tierKey: string) {
     setTierError(null);

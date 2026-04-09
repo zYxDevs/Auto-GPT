@@ -32,7 +32,7 @@ from backend.data.notifications import NotificationEventModel, RefundRequestData
 from backend.data.user import get_user_by_id, get_user_email_by_id
 from backend.notifications.notifications import queue_notification_async
 from backend.util.exceptions import InsufficientBalanceError
-from backend.util.feature_flag import Flag, is_feature_enabled
+from backend.util.feature_flag import Flag, get_feature_flag_value, is_feature_enabled
 from backend.util.json import SafeJson, dumps
 from backend.util.models import Pagination
 from backend.util.retry import func_retry
@@ -1260,9 +1260,10 @@ async def set_auto_top_up(user_id: str, config: AutoTopUpConfig):
     tier = user.subscription_tier or SubscriptionTier.FREE
     sub_cost = await get_subscription_cost(user_id, tier)
     if sub_cost > 0 and config.amount < sub_cost:
+        cost_fmt = f"${sub_cost / 100:.2f}/mo"
         raise ValueError(
-            f"Auto top-up amount must be at least {sub_cost} credits to maintain "
-            f"your {tier.value} subscription. Set amount >= {sub_cost} or downgrade to Free."
+            f"Auto top-up amount must be at least {cost_fmt} to maintain "
+            f"your {tier.value} subscription. Set amount >= {cost_fmt} or downgrade to Free."
         )
     await User.prisma().update(
         where={"id": user_id},
@@ -1287,9 +1288,11 @@ async def set_subscription_tier(user_id: str, tier: SubscriptionTier) -> None:
     if sub_cost > 0:
         auto_top_up = await get_auto_top_up(user_id)
         if auto_top_up.amount < sub_cost:
+            cost_fmt = f"${sub_cost / 100:.2f}/mo"
             raise ValueError(
-                f"Auto top-up must be configured with amount >= {sub_cost} credits "
-                f"before upgrading to {tier.value}. Current amount: {auto_top_up.amount}."
+                f"Auto top-up must be configured with amount >= {cost_fmt} "
+                f"before upgrading to {tier.value}. "
+                f"Current amount: ${auto_top_up.amount / 100:.2f}/mo."
             )
 
     await User.prisma().update(
@@ -1322,8 +1325,6 @@ async def get_auto_top_up(user_id: str) -> AutoTopUpConfig:
 
 async def get_subscription_cost(user_id: str, tier: SubscriptionTier) -> int:
     """Return monthly subscription cost in credits from LD. 0 = free or disabled."""
-    from backend.util.feature_flag import get_feature_flag_value
-
     flag_map = {
         SubscriptionTier.PRO: Flag.SUBSCRIPTION_COST_PRO,
         SubscriptionTier.BUSINESS: Flag.SUBSCRIPTION_COST_BUSINESS,

@@ -662,6 +662,7 @@ class SubscriptionStatusResponse(BaseModel):
 @v1_router.get(
     path="/credits/subscription",
     summary="Get subscription tier, current cost, and all tier costs",
+    operation_id="getSubscriptionStatus",
     tags=["credits"],
     dependencies=[Security(requires_user)],
 )
@@ -689,6 +690,7 @@ async def get_subscription_status(
 @v1_router.post(
     path="/credits/subscription",
     summary="Upgrade or downgrade subscription tier",
+    operation_id="updateSubscriptionTier",
     tags=["credits"],
     dependencies=[Security(requires_user)],
 )

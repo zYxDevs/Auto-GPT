@@ -118,6 +118,8 @@ async def check_rate_limit(
     Fails open: if Redis is unavailable, allows the request.
     """
     # Lazy subscription deduction — idempotent, only writes once per month.
+    # get_user_by_id and get_feature_flag_value are both cached (TTL 5 min / LD
+    # streaming), so the fast path (subscription already paid) adds no DB round-trips.
     try:
         from backend.data.credit import ensure_subscription_paid
 

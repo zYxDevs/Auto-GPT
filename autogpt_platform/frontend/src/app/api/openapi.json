@@ -1789,7 +1789,7 @@
       "get": {
         "tags": ["v1", "credits"],
         "summary": "Get subscription tier, current cost, and all tier costs",
-        "operationId": "getV1Get subscription tier, current cost, and all tier costs",
+        "operationId": "getSubscriptionStatus",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1810,7 +1810,7 @@
       "post": {
         "tags": ["v1", "credits"],
         "summary": "Upgrade or downgrade subscription tier",
-        "operationId": "postV1Upgrade or downgrade subscription tier",
+        "operationId": "updateSubscriptionTier",
         "requestBody": {
           "content": {
             "application/json": {
