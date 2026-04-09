@@ -126,6 +126,25 @@ describe("estimateCostForRow", () => {
     expect(estimateCostForRow(row, {})).toBeNull();
   });
 
+  it("uses cache-aware rates when cache tokens present", () => {
+    // anthropic base rate = $0.008/1K tokens
+    // uncached input 1000 * 0.008/1K = 0.008
+    // cache reads 2000 * 0.008 * 0.1 / 1K = 0.0016
+    // cache writes 500 * 0.008 * 1.25 / 1K = 0.005
+    // output 1000 * 0.008/1K = 0.008
+    // total = 0.0226 USD = 22_600 microdollars
+    const row = makeRow({
+      provider: "anthropic",
+      tracking_type: "tokens",
+      total_cost_microdollars: 0,
+      total_input_tokens: 1000,
+      total_output_tokens: 1000,
+      total_cache_read_tokens: 2000,
+      total_cache_creation_tokens: 500,
+    });
+    expect(estimateCostForRow(row, {})).toBe(22_600);
+  });
+
   it("uses per-run override when provided", () => {
     const row = makeRow({
       provider: "google_maps",

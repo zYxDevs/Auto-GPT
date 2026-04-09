@@ -196,7 +196,7 @@ export function trackingValue(row: ProviderCostSummary) {
     const cacheRead = row.total_cache_read_tokens ?? 0;
     const cacheWrite = row.total_cache_creation_tokens ?? 0;
     if (cacheRead > 0 || cacheWrite > 0) {
-      return `${formatTokens(tokens)} tokens (+${formatTokens(cacheRead)} cached)`;
+      return `${formatTokens(tokens)} tokens (+${formatTokens(cacheRead)}r/${formatTokens(cacheWrite)}w cached)`;
     }
     return `${formatTokens(tokens)} tokens`;
   }

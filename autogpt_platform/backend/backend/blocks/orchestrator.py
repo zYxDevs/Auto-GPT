@@ -1725,9 +1725,7 @@ class OrchestratorBlock(Block):
                                     sdk_msg.usage, "output_tokens", 0
                                 )
                             if sdk_msg.total_cost_usd is not None:
-                                total_cost_usd = (
-                                    total_cost_usd or 0.0
-                                ) + sdk_msg.total_cost_usd
+                                total_cost_usd = sdk_msg.total_cost_usd
                 finally:
                     if pending_task is not None and not pending_task.done():
                         pending_task.cancel()
