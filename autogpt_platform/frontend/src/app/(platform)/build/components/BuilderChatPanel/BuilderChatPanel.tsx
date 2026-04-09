@@ -11,7 +11,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { KeyboardEvent, useEffect, useRef } from "react";
-import ReactMarkdown from "react-markdown";
+import { MessagePartRenderer } from "@/app/(platform)/copilot/components/ChatMessagesContainer/components/MessagePartRenderer";
 import type { CustomNode } from "../FlowEditor/nodes/CustomNode/CustomNode";
 import {
   GraphAction,
@@ -254,57 +254,16 @@ function MessageList({
                 : "bg-slate-100 text-slate-800",
             )}
           >
-            {msg.role === "assistant" ? (
-              <ReactMarkdown
-                allowedElements={[
-                  "p",
-                  "strong",
-                  "em",
-                  "code",
-                  "pre",
-                  "ul",
-                  "ol",
-                  "li",
-                  "blockquote",
-                  "a",
-                  "br",
-                ]}
-                unwrapDisallowed
-                components={{
-                  p: ({ children }) => (
-                    <p className="mb-1 last:mb-0">{children}</p>
-                  ),
-                  code: ({ children }) => (
-                    <code className="rounded bg-slate-200 px-1 py-0.5 font-mono text-xs">
-                      {children}
-                    </code>
-                  ),
-                  pre: ({ children }) => (
-                    <pre className="my-1 overflow-x-auto rounded bg-slate-200 p-2 font-mono text-xs">
-                      {children}
-                    </pre>
-                  ),
-                  a: ({ href, children }) => {
-                    const safeHref =
-                      href && /^https?:\/\//i.test(href) ? href : undefined;
-                    return (
-                      <a
-                        href={safeHref}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline hover:no-underline"
-                      >
-                        {children}
-                      </a>
-                    );
-                  },
-                }}
-              >
-                {textParts}
-              </ReactMarkdown>
-            ) : (
-              textParts
-            )}
+            {msg.role === "assistant"
+              ? msg.parts.map((part, i) => (
+                  <MessagePartRenderer
+                    key={`${msg.id}-${i}`}
+                    part={part}
+                    messageID={msg.id}
+                    partIndex={i}
+                  />
+                ))
+              : textParts}
           </div>
         );
       })}
