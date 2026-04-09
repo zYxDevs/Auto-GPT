@@ -229,8 +229,8 @@ async def test_sync_subscription_from_stripe_unknown_price_defaults_to_free():
         ) as mock_set,
     ):
         await sync_subscription_from_stripe(stripe_sub)
-        # Unknown price → default to FREE, do not return early
-        mock_set.assert_awaited_once_with("user-1", SubscriptionTier.FREE)
+        # Unknown price → preserve current tier (early return, no DB write)
+        mock_set.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -259,8 +259,8 @@ async def test_sync_subscription_from_stripe_none_ld_price_defaults_to_free():
         ) as mock_set,
     ):
         await sync_subscription_from_stripe(stripe_sub)
-        # None from LD → comparison guards prevent match → default to FREE
-        mock_set.assert_awaited_once_with("user-1", SubscriptionTier.FREE)
+        # None from LD → comparison guards prevent match → preserve current tier
+        mock_set.assert_not_awaited()
 
 
 @pytest.mark.asyncio

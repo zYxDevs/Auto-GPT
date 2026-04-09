@@ -736,6 +736,14 @@ async def update_subscription_tier(
     # Pydantic validates tier is one of FREE/PRO/BUSINESS via Literal type.
     tier = SubscriptionTier(request.tier)
 
+    # ENTERPRISE tier is admin-managed — block self-service changes from ENTERPRISE users.
+    user = await get_user_by_id(user_id)
+    if (user.subscription_tier or SubscriptionTier.FREE) == SubscriptionTier.ENTERPRISE:
+        raise HTTPException(
+            status_code=403,
+            detail="ENTERPRISE subscription changes must be managed by an administrator",
+        )
+
     payment_enabled = await is_feature_enabled(
         Flag.ENABLE_PLATFORM_PAYMENT, user_id, default=False
     )

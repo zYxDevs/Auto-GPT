@@ -1348,16 +1348,16 @@ async def sync_subscription_from_stripe(stripe_subscription: dict) -> None:
         elif price_id and biz_price and price_id == biz_price:
             tier = SubscriptionTier.BUSINESS
         else:
-            # Unknown or unconfigured price ID — log a warning and default to FREE
-            # to avoid leaving a paying user stuck on a stale tier if LD flags are
-            # misconfigured or the price ID has changed.
+            # Unknown or unconfigured price ID — preserve the user's current tier
+            # rather than defaulting to FREE. This prevents accidental downgrades
+            # during a price migration or when LD flags are not yet configured.
             logger.warning(
                 "sync_subscription_from_stripe: unknown price %s for customer %s,"
-                " defaulting to FREE",
+                " preserving current tier",
                 price_id,
                 customer_id,
             )
-            tier = SubscriptionTier.FREE
+            return
     else:
         tier = SubscriptionTier.FREE
     await set_subscription_tier(user.id, tier)
