@@ -47,6 +47,56 @@ class TestLLMStatsTracking:
             assert response.response == "Test response"
 
     @pytest.mark.asyncio
+    async def test_llm_call_anthropic_returns_cache_tokens(self):
+        """Test that llm_call returns cache read/creation tokens from Anthropic."""
+        from pydantic import SecretStr
+
+        import backend.blocks.llm as llm
+        from backend.data.model import APIKeyCredentials
+
+        anthropic_creds = APIKeyCredentials(
+            id="test-anthropic-id",
+            provider="anthropic",
+            api_key=SecretStr("mock-anthropic-key"),
+            title="Mock Anthropic key",
+            expires_at=None,
+        )
+
+        mock_content_block = MagicMock()
+        mock_content_block.type = "text"
+        mock_content_block.text = "Test anthropic response"
+
+        mock_usage = MagicMock()
+        mock_usage.input_tokens = 15
+        mock_usage.output_tokens = 25
+        mock_usage.cache_read_input_tokens = 100
+        mock_usage.cache_creation_input_tokens = 50
+
+        mock_response = MagicMock()
+        mock_response.content = [mock_content_block]
+        mock_response.usage = mock_usage
+        mock_response.stop_reason = "end_turn"
+
+        with patch("anthropic.AsyncAnthropic") as mock_anthropic:
+            mock_client = AsyncMock()
+            mock_anthropic.return_value = mock_client
+            mock_client.messages.create = AsyncMock(return_value=mock_response)
+
+            response = await llm.llm_call(
+                credentials=anthropic_creds,
+                llm_model=llm.LlmModel.CLAUDE_3_HAIKU,
+                prompt=[{"role": "user", "content": "Hello"}],
+                max_tokens=100,
+            )
+
+            assert isinstance(response, llm.LLMResponse)
+            assert response.prompt_tokens == 15
+            assert response.completion_tokens == 25
+            assert response.cache_read_tokens == 100
+            assert response.cache_creation_tokens == 50
+            assert response.response == "Test anthropic response"
+
+    @pytest.mark.asyncio
     async def test_ai_structured_response_block_tracks_stats(self):
         """Test that AIStructuredResponseGeneratorBlock correctly tracks stats."""
         from unittest.mock import patch
@@ -257,6 +307,80 @@ class TestLLMStatsTracking:
         # Tokens from both attempts accumulate
         assert block.execution_stats.input_token_count == 30
         assert block.execution_stats.output_token_count == 15
+
+    @pytest.mark.asyncio
+    async def test_cache_tokens_accumulated_in_stats(self):
+        """Cache read/creation tokens are tracked per-attempt and accumulated."""
+        import backend.blocks.llm as llm
+
+        block = llm.AIStructuredResponseGeneratorBlock()
+
+        async def mock_llm_call(*args, **kwargs):
+            return llm.LLMResponse(
+                raw_response="",
+                prompt=[],
+                response='<json_output id="tok123456">{"key1": "v1", "key2": "v2"}</json_output>',
+                tool_calls=None,
+                prompt_tokens=10,
+                completion_tokens=5,
+                cache_read_tokens=20,
+                cache_creation_tokens=8,
+                reasoning=None,
+                provider_cost=0.005,
+            )
+
+        block.llm_call = mock_llm_call  # type: ignore
+
+        input_data = llm.AIStructuredResponseGeneratorBlock.Input(
+            prompt="Test prompt",
+            expected_format={"key1": "desc1", "key2": "desc2"},
+            model=llm.DEFAULT_LLM_MODEL,
+            credentials=llm.TEST_CREDENTIALS_INPUT,  # type: ignore
+            retry=1,
+        )
+
+        with patch("secrets.token_hex", return_value="tok123456"):
+            async for _ in block.run(input_data, credentials=llm.TEST_CREDENTIALS):
+                pass
+
+        assert block.execution_stats.cache_read_token_count == 20
+        assert block.execution_stats.cache_creation_token_count == 8
+
+    @pytest.mark.asyncio
+    async def test_failure_path_persists_accumulated_cost(self):
+        """When all retries are exhausted, accumulated provider_cost is preserved."""
+        import backend.blocks.llm as llm
+
+        block = llm.AIStructuredResponseGeneratorBlock()
+
+        async def mock_llm_call(*args, **kwargs):
+            return llm.LLMResponse(
+                raw_response="",
+                prompt=[],
+                response="not valid json at all",
+                tool_calls=None,
+                prompt_tokens=10,
+                completion_tokens=5,
+                reasoning=None,
+                provider_cost=0.01,
+            )
+
+        block.llm_call = mock_llm_call  # type: ignore
+
+        input_data = llm.AIStructuredResponseGeneratorBlock.Input(
+            prompt="Test prompt",
+            expected_format={"key1": "desc1"},
+            model=llm.DEFAULT_LLM_MODEL,
+            credentials=llm.TEST_CREDENTIALS_INPUT,  # type: ignore
+            retry=2,
+        )
+
+        with pytest.raises(RuntimeError):
+            async for _ in block.run(input_data, credentials=llm.TEST_CREDENTIALS):
+                pass
+
+        # Both retry attempts each cost $0.01, total $0.02
+        assert block.execution_stats.provider_cost == pytest.approx(0.02)
 
     @pytest.mark.asyncio
     async def test_ai_text_summarizer_multiple_chunks(self):

@@ -17,7 +17,22 @@ from .platform_cost import (
     get_platform_cost_logs_for_export,
     log_platform_cost,
     log_platform_cost_safe,
+    usd_to_microdollars,
 )
+
+
+class TestUsdToMicrodollars:
+    def test_none_returns_none(self):
+        assert usd_to_microdollars(None) is None
+
+    def test_zero_returns_zero(self):
+        assert usd_to_microdollars(0.0) == 0
+
+    def test_positive_value(self):
+        assert usd_to_microdollars(0.001) == 1000
+
+    def test_large_value(self):
+        assert usd_to_microdollars(1.0) == 1_000_000
 
 
 class TestMaskEmail:
@@ -335,6 +350,14 @@ class TestGetPlatformCostLogs:
             logs, total = await get_platform_cost_logs()
         assert total == 0
 
+    @pytest.mark.asyncio
+    async def test_explicit_start_skips_default(self):
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        mock_query = AsyncMock(side_effect=[[{"cnt": 0}], []])
+        with patch("backend.data.platform_cost.query_raw_with_schema", new=mock_query):
+            logs, total = await get_platform_cost_logs(start=start)
+        assert total == 0
+
 
 def _make_log_row(i: int = 0) -> dict:
     return {
@@ -409,3 +432,12 @@ class TestGetPlatformCostLogsForExport:
             logs, _ = await get_platform_cost_logs_for_export()
         assert logs[0].cache_read_tokens == 50
         assert logs[0].cache_creation_tokens == 25
+
+    @pytest.mark.asyncio
+    async def test_explicit_start_skips_default(self):
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        mock_query = AsyncMock(return_value=[])
+        with patch("backend.data.platform_cost.query_raw_with_schema", new=mock_query):
+            logs, truncated = await get_platform_cost_logs_for_export(start=start)
+        assert logs == []
+        assert truncated is False
