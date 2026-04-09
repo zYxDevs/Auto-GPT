@@ -16,7 +16,19 @@ from .platform_cost import (
     get_platform_cost_logs,
     log_platform_cost,
     log_platform_cost_safe,
+    usd_to_microdollars,
 )
+
+
+class TestUsdToMicrodollars:
+    def test_none_returns_none(self):
+        assert usd_to_microdollars(None) is None
+
+    def test_converts_usd_to_microdollars(self):
+        assert usd_to_microdollars(1.0) == 1_000_000
+
+    def test_fractional_usd(self):
+        assert usd_to_microdollars(0.0042) == 4200
 
 
 class TestMaskEmail:
@@ -284,3 +296,13 @@ class TestGetPlatformCostLogs:
         with patch("backend.data.platform_cost.query_raw_with_schema", new=mock_query):
             logs, total = await get_platform_cost_logs()
         assert total == 0
+
+    @pytest.mark.asyncio
+    async def test_explicit_start_skips_default(self):
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        mock_query = AsyncMock(side_effect=[[{"cnt": 0}], []])
+        with patch("backend.data.platform_cost.query_raw_with_schema", new=mock_query):
+            logs, total = await get_platform_cost_logs(start=start)
+        assert total == 0
+        first_call_sql = mock_query.call_args_list[0][0][0]
+        assert "createdAt" in first_call_sql
