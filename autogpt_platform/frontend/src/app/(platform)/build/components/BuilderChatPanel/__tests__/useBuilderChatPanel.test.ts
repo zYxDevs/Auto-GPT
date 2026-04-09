@@ -1409,3 +1409,62 @@ describe("useBuilderChatPanel – tool call detection", () => {
     expect(onGraphEdited).toHaveBeenCalledOnce();
   });
 });
+
+describe("useBuilderChatPanel – prototype pollution blocklist (no-schema nodes)", () => {
+  it("rejects __proto__ even when node has no inputSchema", () => {
+    mockNodes.push({ id: "n-schema-less", data: { hardcodedValues: {} } });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "update_node_input",
+        nodeId: "n-schema-less",
+        key: "__proto__",
+        value: "injected",
+      });
+    });
+
+    expect(mockSetNodes).not.toHaveBeenCalled();
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ variant: "destructive" }),
+    );
+  });
+
+  it("rejects constructor even when node has no inputSchema", () => {
+    mockNodes.push({ id: "n-ctor-no-schema", data: { hardcodedValues: {} } });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "update_node_input",
+        nodeId: "n-ctor-no-schema",
+        key: "constructor",
+        value: "injected",
+      });
+    });
+
+    expect(mockSetNodes).not.toHaveBeenCalled();
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ variant: "destructive" }),
+    );
+  });
+
+  it("rejects prototype even when node has no inputSchema", () => {
+    mockNodes.push({ id: "n-proto-no-schema", data: { hardcodedValues: {} } });
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    act(() => {
+      result.current.handleApplyAction({
+        type: "update_node_input",
+        nodeId: "n-proto-no-schema",
+        key: "prototype",
+        value: "injected",
+      });
+    });
+
+    expect(mockSetNodes).not.toHaveBeenCalled();
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ variant: "destructive" }),
+    );
+  });
+});

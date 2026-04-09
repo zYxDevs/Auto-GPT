@@ -282,7 +282,7 @@ export function useBuilderChatPanel({
         } else if (dynPart.toolName === "run_agent") {
           const output = dynPart.output as Record<string, unknown> | null;
           const execId = output?.execution_id;
-          if (typeof execId === "string" && execId) {
+          if (typeof execId === "string" && /^[\w-]+$/i.test(execId)) {
             setQueryStates({ flowExecutionID: execId });
           }
         }
@@ -350,6 +350,18 @@ export function useBuilderChatPanel({
         toast({
           title: "Cannot apply change",
           description: `Node "${action.nodeId}" was not found in the graph.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      // Block prototype-polluting keys regardless of schema presence.
+      // The schema check below uses hasOwnProperty so __proto__ is caught when
+      // schemaProps exists, but this guard handles the no-schema case.
+      const DANGEROUS_KEYS = ["__proto__", "constructor", "prototype"];
+      if (DANGEROUS_KEYS.includes(action.key)) {
+        toast({
+          title: "Cannot apply change",
+          description: `Field "${action.key}" is not a valid input.`,
           variant: "destructive",
         });
         return;
