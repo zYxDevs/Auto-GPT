@@ -984,15 +984,8 @@ async def stream_chat_completion_baseline(
     else:
         base_system_prompt, understanding = await prompt_task
 
-    # Append user message to transcript.
-    # Always append when the message is present and is from the user,
-    # even on duplicate-suppressed retries (is_new_message=False).
-    # The loaded transcript may be stale (uploaded before the previous
-    # attempt stored this message), so skipping it would leave the
-    # transcript without the user turn, creating a malformed
-    # assistant-after-assistant structure when the LLM reply is added.
-    if message and is_user_message:
-        transcript_builder.append_user(content=message)
+    # Append user message to transcript after context injection below so the
+    # transcript receives the prefixed message when user context is available.
 
     # Generate title for new sessions
     if is_user_message and not session.title:
@@ -1045,18 +1038,40 @@ async def stream_chat_completion_baseline(
     # Inject user context into the first user message on first turn.
     # Done before attachment/URL injection so the context prefix lands at
     # the very start of the message content.
+    # The prefixed content is also stored back into session.messages and the
+    # transcript so that resumed sessions and the transcript both carry the
+    # personalisation beyond the first request.
+    user_message_for_transcript = message
     if should_inject_user_context and understanding:
         user_ctx = format_understanding_for_prompt(understanding)
-        injected = False
+        prefixed: str | None = None
         for msg in openai_messages:
             if msg["role"] == "user":
-                msg["content"] = (
+                prefixed = (
                     f"<user_context>\n{user_ctx}\n</user_context>\n\n{msg['content']}"
                 )
-                injected = True
+                msg["content"] = prefixed
                 break
-        if not injected:
+        if prefixed is not None:
+            # Persist the prefixed content so subsequent turns and --resume
+            # retain the user context.
+            for session_msg in session.messages:
+                if session_msg.role == "user":
+                    session_msg.content = prefixed
+                    break
+            user_message_for_transcript = prefixed
+        else:
             logger.warning("[Baseline] No user message found for context injection")
+
+    # Append user message to transcript.
+    # Always append when the message is present and is from the user,
+    # even on duplicate-suppressed retries (is_new_message=False).
+    # The loaded transcript may be stale (uploaded before the previous
+    # attempt stored this message), so skipping it would leave the
+    # transcript without the user turn, creating a malformed
+    # assistant-after-assistant structure when the LLM reply is added.
+    if message and is_user_message:
+        transcript_builder.append_user(content=user_message_for_transcript or message)
 
     # --- File attachments (feature parity with SDK path) ---
     working_dir: str | None = None

@@ -2031,11 +2031,21 @@ async def stream_chat_completion_sdk(
         # On the first turn inject user context into the message instead of the
         # system prompt — the system prompt is now static (same for all users)
         # so the LLM can cache it across sessions.
+        # current_message is updated so the transcript and session.messages also
+        # store the prefixed content, preserving personalisation across turns and
+        # on --resume.
         if not has_history and understanding:
             user_ctx = format_understanding_for_prompt(understanding)
-            query_message = (
-                f"<user_context>\n{user_ctx}\n</user_context>\n\n{query_message}"
+            prefixed_message = (
+                f"<user_context>\n{user_ctx}\n</user_context>\n\n{current_message}"
             )
+            current_message = prefixed_message
+            query_message = prefixed_message
+            # Persist the prefixed content so resumed sessions retain the context.
+            for session_msg in session.messages:
+                if session_msg.role == "user":
+                    session_msg.content = prefixed_message
+                    break
         # If files are attached, prepare them: images become vision
         # content blocks in the user message, other files go to sdk_cwd.
         attachments = await _prepare_file_attachments(

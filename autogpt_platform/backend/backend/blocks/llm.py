@@ -744,12 +744,12 @@ class LLMResponse(BaseModel):
 
 def convert_openai_tool_fmt_to_anthropic(
     openai_tools: list[dict] | None = None,
-) -> Iterable[ToolParam] | anthropic.Omit:
+) -> Iterable[ToolParam] | anthropic.NotGiven:
     """
     Convert OpenAI tool format to Anthropic tool format.
     """
     if not openai_tools or len(openai_tools) == 0:
-        return anthropic.omit
+        return anthropic.NOT_GIVEN
 
     anthropic_tools = []
     for tool in openai_tools:
@@ -999,20 +999,22 @@ async def llm_call(
         client = anthropic.AsyncAnthropic(
             api_key=credentials.api_key.get_secret_value()
         )
-        resp = await client.messages.create(
+        create_kwargs: dict[str, Any] = dict(
             model=llm_model.value,
-            system=[
-                {
-                    "type": "text",
-                    "text": sysprompt,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
             messages=messages,
             max_tokens=max_tokens,
             tools=an_tools,
             timeout=600,
         )
+        if sysprompt.strip():
+            create_kwargs["system"] = [
+                {
+                    "type": "text",
+                    "text": sysprompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        resp = await client.messages.create(**create_kwargs)
 
         if not resp.content:
             raise ValueError("No content returned from Anthropic.")

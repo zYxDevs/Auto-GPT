@@ -1111,3 +1111,181 @@ class TestExtractOpenRouterCost:
     def test_returns_none_for_negative_cost(self):
         response = self._mk_response({"x-total-cost": "-0.005"})
         assert llm.extract_openrouter_cost(response) is None
+
+
+class TestAnthropicCacheControl:
+    """Verify that llm_call attaches cache_control to the system prompt block
+    and to the last tool definition when calling the Anthropic API."""
+
+    def _make_anthropic_credentials(self) -> llm.APIKeyCredentials:
+        from pydantic import SecretStr
+
+        return llm.APIKeyCredentials(
+            id="test-anthropic-id",
+            provider="anthropic",
+            api_key=SecretStr("mock-anthropic-key"),
+            title="Mock Anthropic key",
+            expires_at=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_system_prompt_sent_as_block_with_cache_control(self):
+        """The system prompt is wrapped in a structured block with cache_control ephemeral."""
+        mock_resp = MagicMock()
+        mock_resp.content = [MagicMock(type="text", text="hello")]
+        mock_resp.usage = MagicMock(input_tokens=5, output_tokens=3)
+
+        captured_kwargs: dict = {}
+
+        async def fake_create(**kwargs):
+            captured_kwargs.update(kwargs)
+            return mock_resp
+
+        mock_client = MagicMock()
+        mock_client.messages.create = fake_create
+
+        credentials = self._make_anthropic_credentials()
+
+        with patch("anthropic.AsyncAnthropic", return_value=mock_client):
+            await llm.llm_call(
+                credentials=credentials,
+                llm_model=llm.LlmModel.CLAUDE_4_6_SONNET,
+                prompt=[
+                    {"role": "system", "content": "You are an assistant."},
+                    {"role": "user", "content": "Hello"},
+                ],
+                max_tokens=100,
+            )
+
+        system_arg = captured_kwargs.get("system")
+        assert isinstance(system_arg, list), "system should be a list of blocks"
+        assert len(system_arg) == 1
+        block = system_arg[0]
+        assert block["type"] == "text"
+        assert block["text"] == "You are an assistant."
+        assert block.get("cache_control") == {"type": "ephemeral"}
+
+    @pytest.mark.asyncio
+    async def test_last_tool_gets_cache_control(self):
+        """cache_control is placed on the last tool in the Anthropic tools list."""
+        mock_resp = MagicMock()
+        mock_resp.content = [MagicMock(type="text", text="ok")]
+        mock_resp.usage = MagicMock(input_tokens=10, output_tokens=5)
+
+        captured_kwargs: dict = {}
+
+        async def fake_create(**kwargs):
+            captured_kwargs.update(kwargs)
+            return mock_resp
+
+        mock_client = MagicMock()
+        mock_client.messages.create = fake_create
+
+        credentials = self._make_anthropic_credentials()
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "tool_a",
+                    "description": "First tool",
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "tool_b",
+                    "description": "Second tool",
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                },
+            },
+        ]
+
+        with patch("anthropic.AsyncAnthropic", return_value=mock_client):
+            await llm.llm_call(
+                credentials=credentials,
+                llm_model=llm.LlmModel.CLAUDE_4_6_SONNET,
+                prompt=[
+                    {"role": "system", "content": "System."},
+                    {"role": "user", "content": "Do something"},
+                ],
+                max_tokens=100,
+                tools=tools,
+            )
+
+        an_tools = captured_kwargs.get("tools")
+        assert isinstance(an_tools, list)
+        assert len(an_tools) == 2
+        assert (
+            an_tools[0].get("cache_control") is None
+        ), "Only last tool gets cache_control"
+        assert an_tools[-1].get("cache_control") == {"type": "ephemeral"}
+
+    @pytest.mark.asyncio
+    async def test_no_tools_no_cache_control_on_tools(self):
+        """When there are no tools, the Anthropic call receives anthropic.omit for tools."""
+        mock_resp = MagicMock()
+        mock_resp.content = [MagicMock(type="text", text="ok")]
+        mock_resp.usage = MagicMock(input_tokens=5, output_tokens=2)
+
+        captured_kwargs: dict = {}
+
+        async def fake_create(**kwargs):
+            captured_kwargs.update(kwargs)
+            return mock_resp
+
+        mock_client = MagicMock()
+        mock_client.messages.create = fake_create
+
+        credentials = self._make_anthropic_credentials()
+
+        with patch("anthropic.AsyncAnthropic", return_value=mock_client):
+            await llm.llm_call(
+                credentials=credentials,
+                llm_model=llm.LlmModel.CLAUDE_4_6_SONNET,
+                prompt=[
+                    {"role": "system", "content": "System."},
+                    {"role": "user", "content": "Hello"},
+                ],
+                max_tokens=100,
+                tools=None,
+            )
+
+        tools_arg = captured_kwargs.get("tools")
+        assert tools_arg is llm.convert_openai_tool_fmt_to_anthropic(
+            None
+        ), "Empty tools should pass anthropic.NOT_GIVEN sentinel"
+
+    @pytest.mark.asyncio
+    async def test_empty_system_prompt_omits_system_key(self):
+        """When sysprompt is empty, the 'system' key must not be sent to Anthropic.
+
+        Anthropic rejects empty text blocks; the guard in llm_call must ensure
+        the system argument is omitted entirely when no system messages are present.
+        """
+        mock_resp = MagicMock()
+        mock_resp.content = [MagicMock(type="text", text="ok")]
+        mock_resp.usage = MagicMock(input_tokens=3, output_tokens=2)
+
+        captured_kwargs: dict = {}
+
+        async def fake_create(**kwargs):
+            captured_kwargs.update(kwargs)
+            return mock_resp
+
+        mock_client = MagicMock()
+        mock_client.messages.create = fake_create
+
+        credentials = self._make_anthropic_credentials()
+
+        with patch("anthropic.AsyncAnthropic", return_value=mock_client):
+            await llm.llm_call(
+                credentials=credentials,
+                llm_model=llm.LlmModel.CLAUDE_4_6_SONNET,
+                prompt=[{"role": "user", "content": "Hi"}],
+                max_tokens=50,
+            )
+
+        assert (
+            "system" not in captured_kwargs
+        ), "system must be omitted when sysprompt is empty to avoid Anthropic 400"
