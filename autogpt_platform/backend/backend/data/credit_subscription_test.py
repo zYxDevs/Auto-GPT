@@ -199,3 +199,128 @@ async def test_create_subscription_checkout_no_price_raises():
                 success_url="https://app.example.com/success",
                 cancel_url="https://app.example.com/cancel",
             )
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_from_stripe_unknown_price_defaults_to_free():
+    """Unknown price_id should default to FREE instead of returning early."""
+    mock_user = MagicMock(spec=User)
+    mock_user.id = "user-1"
+    stripe_sub = {
+        "customer": "cus_123",
+        "status": "active",
+        "items": {"data": [{"price": {"id": "price_unknown"}}]},
+    }
+
+    async def mock_price_id(tier: SubscriptionTier) -> str | None:
+        return "price_pro_monthly" if tier == SubscriptionTier.PRO else None
+
+    with (
+        patch(
+            "backend.data.credit.User.prisma",
+            return_value=MagicMock(find_first=AsyncMock(return_value=mock_user)),
+        ),
+        patch(
+            "backend.data.credit.get_subscription_price_id",
+            side_effect=mock_price_id,
+        ),
+        patch(
+            "backend.data.credit.set_subscription_tier", new_callable=AsyncMock
+        ) as mock_set,
+    ):
+        await sync_subscription_from_stripe(stripe_sub)
+        # Unknown price → default to FREE, do not return early
+        mock_set.assert_awaited_once_with("user-1", SubscriptionTier.FREE)
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_from_stripe_none_ld_price_defaults_to_free():
+    """When LD returns None for price IDs, active subscription should default to FREE."""
+    mock_user = MagicMock(spec=User)
+    mock_user.id = "user-1"
+    stripe_sub = {
+        "customer": "cus_123",
+        "status": "active",
+        "items": {"data": [{"price": {"id": "price_pro_monthly"}}]},
+    }
+
+    with (
+        patch(
+            "backend.data.credit.User.prisma",
+            return_value=MagicMock(find_first=AsyncMock(return_value=mock_user)),
+        ),
+        patch(
+            "backend.data.credit.get_subscription_price_id",
+            new_callable=AsyncMock,
+            return_value=None,  # LD flags unconfigured
+        ),
+        patch(
+            "backend.data.credit.set_subscription_tier", new_callable=AsyncMock
+        ) as mock_set,
+    ):
+        await sync_subscription_from_stripe(stripe_sub)
+        # None from LD → comparison guards prevent match → default to FREE
+        mock_set.assert_awaited_once_with("user-1", SubscriptionTier.FREE)
+
+
+@pytest.mark.asyncio
+async def test_sync_subscription_from_stripe_business_tier():
+    """BUSINESS price_id should map to BUSINESS tier."""
+    mock_user = MagicMock(spec=User)
+    mock_user.id = "user-1"
+    stripe_sub = {
+        "customer": "cus_123",
+        "status": "active",
+        "items": {"data": [{"price": {"id": "price_biz_monthly"}}]},
+    }
+
+    async def mock_price_id(tier: SubscriptionTier) -> str | None:
+        if tier == SubscriptionTier.PRO:
+            return "price_pro_monthly"
+        if tier == SubscriptionTier.BUSINESS:
+            return "price_biz_monthly"
+        return None
+
+    with (
+        patch(
+            "backend.data.credit.User.prisma",
+            return_value=MagicMock(find_first=AsyncMock(return_value=mock_user)),
+        ),
+        patch(
+            "backend.data.credit.get_subscription_price_id",
+            side_effect=mock_price_id,
+        ),
+        patch(
+            "backend.data.credit.set_subscription_tier", new_callable=AsyncMock
+        ) as mock_set,
+    ):
+        await sync_subscription_from_stripe(stripe_sub)
+        mock_set.assert_awaited_once_with("user-1", SubscriptionTier.BUSINESS)
+
+
+@pytest.mark.asyncio
+async def test_cancel_stripe_subscription_handles_stripe_error():
+    """Stripe errors during cancellation should be logged, not raised."""
+    import stripe as stripe_mod
+
+    mock_sub = {"id": "sub_abc123"}
+    mock_subscriptions = MagicMock()
+    mock_subscriptions.auto_paging_iter.return_value = iter([mock_sub])
+
+    with (
+        patch(
+            "backend.data.credit.get_stripe_customer_id",
+            new_callable=AsyncMock,
+            return_value="cus_123",
+        ),
+        patch(
+            "backend.data.credit.stripe.Subscription.list",
+            return_value=mock_subscriptions,
+        ),
+        patch(
+            "backend.data.credit.stripe.Subscription.cancel",
+            side_effect=stripe_mod.StripeError("network error"),
+        ),
+    ):
+        # Should not raise — errors are logged as warnings
+        await cancel_stripe_subscription("user-1")
