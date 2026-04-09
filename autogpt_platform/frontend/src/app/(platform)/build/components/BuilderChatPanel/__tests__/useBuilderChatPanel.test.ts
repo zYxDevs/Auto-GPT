@@ -885,6 +885,29 @@ describe("useBuilderChatPanel – retrySession", () => {
     expect(result.current.sessionId).toBe("sess-retry-seed");
     expect(mockSendMessage).toHaveBeenCalledOnce();
   });
+
+  it("clears stale messages when retrySession is called (setMessages reset)", async () => {
+    // Simulate stale messages from a previous session
+    mockChatMessages = [
+      {
+        id: "stale-1",
+        role: "assistant",
+        parts: [{ type: "text", text: "Old message from failed session" }],
+      },
+    ];
+
+    const { result } = renderHook(() => useBuilderChatPanel());
+
+    // Messages should be present before retry (from mock)
+    expect(result.current.messages).toHaveLength(1);
+
+    act(() => {
+      result.current.retrySession();
+    });
+
+    // setMessages([]) clears the internal useChat message list
+    expect(mockSetMessages).toHaveBeenCalledWith([]);
+  });
 });
 
 describe("useBuilderChatPanel – handleSend", () => {

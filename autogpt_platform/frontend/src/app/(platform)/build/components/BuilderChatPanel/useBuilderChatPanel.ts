@@ -346,12 +346,15 @@ export function useBuilderChatPanel({
   // hasSentSeedMessageRef is reset so the seed message is re-sent to the
   // new session (it may have been set to true by a previous successful session
   // that was later invalidated without a flowID change).
+  // Messages are cleared so stale messages from the previous session are not
+  // shown alongside content from the new session.
   function retrySession() {
     if (flowID) graphSessionCache.delete(flowID);
     setSessionId(null);
     setSessionError(false);
     isCreatingSessionRef.current = false;
     hasSentSeedMessageRef.current = false;
+    setMessages([]);
   }
 
   function handleSend() {
