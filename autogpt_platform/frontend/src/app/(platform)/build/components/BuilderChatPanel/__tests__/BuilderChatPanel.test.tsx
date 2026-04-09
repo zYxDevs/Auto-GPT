@@ -344,7 +344,10 @@ describe("BuilderChatPanel", () => {
   it("passes onGraphEdited to useBuilderChatPanel", () => {
     const onGraphEdited = vi.fn();
     render(<BuilderChatPanel onGraphEdited={onGraphEdited} />);
-    expect(mockUseBuilderChatPanel).toHaveBeenCalledWith({ onGraphEdited });
+    expect(mockUseBuilderChatPanel).toHaveBeenCalledWith({
+      isGraphLoaded: undefined,
+      onGraphEdited,
+    });
   });
 });
 

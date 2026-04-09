@@ -6,8 +6,6 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { MarkerType } from "@xyflow/react";
 import {
-  type Dispatch,
-  type SetStateAction,
   type KeyboardEvent,
   useEffect,
   useMemo,
@@ -17,8 +15,6 @@ import {
 import { parseAsString, useQueryStates } from "nuqs";
 import { useShallow } from "zustand/react/shallow";
 import { useEdgeStore } from "../../stores/edgeStore";
-import type { CustomEdge } from "../FlowEditor/edges/CustomEdge";
-import type { CustomNode } from "../FlowEditor/nodes/CustomNode/CustomNode";
 import { useNodeStore } from "../../stores/nodeStore";
 import {
   GraphAction,
