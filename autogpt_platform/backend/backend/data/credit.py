@@ -1265,6 +1265,23 @@ async def set_subscription_tier(user_id: str, tier: SubscriptionTier) -> None:
     get_user_by_id.cache_delete(user_id)
 
 
+async def cancel_stripe_subscription(user_id: str) -> None:
+    """Cancel all active Stripe subscriptions for a user (called on downgrade to FREE)."""
+    customer_id = await get_stripe_customer_id(user_id)
+    subscriptions = stripe.Subscription.list(
+        customer=customer_id, status="active", limit=10
+    )
+    for sub in subscriptions.auto_paging_iter():
+        try:
+            stripe.Subscription.cancel(sub["id"])
+        except stripe.StripeError:
+            logger.warning(
+                "cancel_stripe_subscription: failed to cancel sub %s for user %s",
+                sub["id"],
+                user_id,
+            )
+
+
 async def get_auto_top_up(user_id: str) -> AutoTopUpConfig:
     user = await get_user_by_id(user_id)
 

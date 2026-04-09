@@ -51,6 +51,7 @@ from backend.data.credit import (
     RefundRequest,
     TransactionHistory,
     UserCredit,
+    cancel_stripe_subscription,
     create_subscription_checkout,
     get_auto_top_up,
     get_user_credit_model,
@@ -735,11 +736,19 @@ async def update_subscription_tier(
     # Pydantic validates tier is one of FREE/PRO/BUSINESS via Literal type.
     tier = SubscriptionTier(request.tier)
 
-    # Downgrade to FREE or beta users (payment not enabled) → update tier directly.
     payment_enabled = await is_feature_enabled(
         Flag.ENABLE_PLATFORM_PAYMENT, user_id, default=False
     )
-    if tier == SubscriptionTier.FREE or not payment_enabled:
+
+    # Downgrade to FREE: cancel active Stripe subscription, then update the DB tier.
+    if tier == SubscriptionTier.FREE:
+        if payment_enabled:
+            await cancel_stripe_subscription(user_id)
+        await set_subscription_tier(user_id, tier)
+        return SubscriptionCheckoutResponse(url="")
+
+    # Beta users (payment not enabled) → update tier directly without Stripe.
+    if not payment_enabled:
         await set_subscription_tier(user_id, tier)
         return SubscriptionCheckoutResponse(url="")
 

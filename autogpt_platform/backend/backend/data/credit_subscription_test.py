@@ -9,6 +9,7 @@ from prisma.enums import SubscriptionTier
 from prisma.models import User
 
 from backend.data.credit import (
+    cancel_stripe_subscription,
     create_subscription_checkout,
     set_subscription_tier,
     sync_subscription_from_stripe,
@@ -113,6 +114,49 @@ async def test_sync_subscription_from_stripe_unknown_customer():
     ):
         # Should not raise even if user not found
         await sync_subscription_from_stripe(stripe_sub)
+
+
+@pytest.mark.asyncio
+async def test_cancel_stripe_subscription_cancels_active():
+    mock_sub = {"id": "sub_abc123"}
+    mock_subscriptions = MagicMock()
+    mock_subscriptions.auto_paging_iter.return_value = iter([mock_sub])
+
+    with (
+        patch(
+            "backend.data.credit.get_stripe_customer_id",
+            new_callable=AsyncMock,
+            return_value="cus_123",
+        ),
+        patch(
+            "backend.data.credit.stripe.Subscription.list",
+            return_value=mock_subscriptions,
+        ),
+        patch("backend.data.credit.stripe.Subscription.cancel") as mock_cancel,
+    ):
+        await cancel_stripe_subscription("user-1")
+        mock_cancel.assert_called_once_with("sub_abc123")
+
+
+@pytest.mark.asyncio
+async def test_cancel_stripe_subscription_no_active():
+    mock_subscriptions = MagicMock()
+    mock_subscriptions.auto_paging_iter.return_value = iter([])
+
+    with (
+        patch(
+            "backend.data.credit.get_stripe_customer_id",
+            new_callable=AsyncMock,
+            return_value="cus_123",
+        ),
+        patch(
+            "backend.data.credit.stripe.Subscription.list",
+            return_value=mock_subscriptions,
+        ),
+        patch("backend.data.credit.stripe.Subscription.cancel") as mock_cancel,
+    ):
+        await cancel_stripe_subscription("user-1")
+        mock_cancel.assert_not_called()
 
 
 @pytest.mark.asyncio
