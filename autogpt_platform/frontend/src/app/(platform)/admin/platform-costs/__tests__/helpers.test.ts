@@ -133,7 +133,7 @@ describe("estimateCostForRow", () => {
       request_count: 10,
     });
     // override = 0.05 * 10 * 1_000_000 = 500_000
-    expect(estimateCostForRow(row, { "google_maps:per_run": 0.05 })).toBe(
+    expect(estimateCostForRow(row, { "google_maps:per_run:": 0.05 })).toBe(
       500_000,
     );
   });

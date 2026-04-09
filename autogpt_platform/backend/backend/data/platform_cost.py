@@ -44,6 +44,8 @@ class PlatformCostEntry(BaseModel):
     cost_microdollars: int | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
     data_size: int | None = None
     duration: float | None = None
     model: str | None = None
@@ -69,6 +71,8 @@ async def log_platform_cost(entry: PlatformCostEntry) -> None:
             costMicrodollars=entry.cost_microdollars,
             inputTokens=entry.input_tokens,
             outputTokens=entry.output_tokens,
+            cacheReadTokens=entry.cache_read_tokens,
+            cacheCreationTokens=entry.cache_creation_tokens,
             dataSize=entry.data_size,
             duration=entry.duration,
             model=entry.model,
@@ -118,9 +122,12 @@ def _mask_email(email: str | None) -> str | None:
 class ProviderCostSummary(BaseModel):
     provider: str
     tracking_type: str | None = None
+    model: str | None = None
     total_cost_microdollars: int
     total_input_tokens: int
     total_output_tokens: int
+    total_cache_read_tokens: int = 0
+    total_cache_creation_tokens: int = 0
     total_duration_seconds: float = 0.0
     total_tracking_amount: float = 0.0
     request_count: int
@@ -222,15 +229,18 @@ async def get_platform_cost_dashboard(
             SELECT
                 p."provider",
                 p."trackingType" AS tracking_type,
+                p."model",
                 COALESCE(SUM(p."costMicrodollars"), 0)::bigint AS total_cost,
                 COALESCE(SUM(p."inputTokens"), 0)::bigint AS total_input_tokens,
                 COALESCE(SUM(p."outputTokens"), 0)::bigint AS total_output_tokens,
+                COALESCE(SUM(p."cacheReadTokens"), 0)::bigint AS total_cache_read_tokens,
+                COALESCE(SUM(p."cacheCreationTokens"), 0)::bigint AS total_cache_creation_tokens,
                 COALESCE(SUM(p."duration"), 0)::float AS total_duration,
                 COALESCE(SUM(p."trackingAmount"), 0)::float AS total_tracking_amount,
                 COUNT(*)::bigint AS request_count
             FROM {{schema_prefix}}"PlatformCostLog" p
             WHERE {where_p}
-            GROUP BY p."provider", p."trackingType"
+            GROUP BY p."provider", p."trackingType", p."model"
             ORDER BY total_cost DESC
             LIMIT {MAX_PROVIDER_ROWS}
             """,
@@ -275,9 +285,12 @@ async def get_platform_cost_dashboard(
             ProviderCostSummary(
                 provider=r["provider"],
                 tracking_type=r.get("tracking_type"),
+                model=r.get("model"),
                 total_cost_microdollars=r["total_cost"],
                 total_input_tokens=r["total_input_tokens"],
                 total_output_tokens=r["total_output_tokens"],
+                total_cache_read_tokens=r.get("total_cache_read_tokens", 0),
+                total_cache_creation_tokens=r.get("total_cache_creation_tokens", 0),
                 total_duration_seconds=r.get("total_duration", 0.0),
                 total_tracking_amount=r.get("total_tracking_amount", 0.0),
                 request_count=r["request_count"],

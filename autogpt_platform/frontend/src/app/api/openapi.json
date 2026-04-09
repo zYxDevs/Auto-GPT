@@ -12335,6 +12335,10 @@
             "anyOf": [{ "type": "string" }, { "type": "null" }],
             "title": "Tracking Type"
           },
+          "model": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Model"
+          },
           "total_cost_microdollars": {
             "type": "integer",
             "title": "Total Cost Microdollars"
@@ -12346,6 +12350,16 @@
           "total_output_tokens": {
             "type": "integer",
             "title": "Total Output Tokens"
+          },
+          "total_cache_read_tokens": {
+            "type": "integer",
+            "title": "Total Cache Read Tokens",
+            "default": 0
+          },
+          "total_cache_creation_tokens": {
+            "type": "integer",
+            "title": "Total Cache Creation Tokens",
+            "default": 0
           },
           "total_duration_seconds": {
             "type": "number",

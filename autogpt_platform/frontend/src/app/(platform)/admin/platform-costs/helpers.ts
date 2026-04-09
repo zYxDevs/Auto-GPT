@@ -111,13 +111,14 @@ export function defaultRateFor(
   }
 }
 
-// Overrides are keyed on `${provider}:${tracking_type}` since the same
-// provider can have multiple rows with different billing models.
+// Overrides are keyed on `${provider}:${tracking_type}:${model}` since the
+// same provider can have multiple rows with different billing models and models.
 export function rateKey(
   provider: string,
   trackingType: string | null | undefined,
+  model?: string | null,
 ): string {
-  return `${provider}:${trackingType ?? "per_run"}`;
+  return `${provider}:${trackingType ?? "per_run"}:${model ?? ""}`;
 }
 
 export function estimateCostForRow(
@@ -136,17 +137,34 @@ export function estimateCostForRow(
   }
 
   const rate =
-    rateOverrides[rateKey(row.provider, tt)] ??
+    rateOverrides[rateKey(row.provider, tt, row.model)] ??
     defaultRateFor(row.provider, tt);
   if (rate === null || rate === undefined) return null;
 
   // Compute the amount for this tracking type, then multiply by rate.
   let amount: number;
   switch (tt) {
-    case "tokens":
+    case "tokens": {
+      // Anthropic cache tokens are billed at different rates:
+      // - cache reads: 10% of base input rate
+      // - cache writes: 125% of base input rate
+      // - uncached input: 100% of base input rate
+      const cacheRead = row.total_cache_read_tokens ?? 0;
+      const cacheWrite = row.total_cache_creation_tokens ?? 0;
+      if (cacheRead > 0 || cacheWrite > 0) {
+        const uncachedInput = row.total_input_tokens;
+        const output = row.total_output_tokens;
+        const cost =
+          (uncachedInput / 1000) * rate +
+          (cacheRead / 1000) * rate * 0.1 +
+          (cacheWrite / 1000) * rate * 1.25 +
+          (output / 1000) * rate;
+        return Math.round(cost * MICRODOLLARS_PER_USD);
+      }
       // Rate is per-1K tokens.
       amount = (row.total_input_tokens + row.total_output_tokens) / 1000;
       break;
+    }
     case "characters":
       // Rate is per-1K chars. trackingAmount aggregates char counts.
       amount = (row.total_tracking_amount || 0) / 1000;
@@ -175,6 +193,11 @@ export function trackingValue(row: ProviderCostSummary) {
   if (tt === "cost_usd") return formatMicrodollars(row.total_cost_microdollars);
   if (tt === "tokens") {
     const tokens = row.total_input_tokens + row.total_output_tokens;
+    const cacheRead = row.total_cache_read_tokens ?? 0;
+    const cacheWrite = row.total_cache_creation_tokens ?? 0;
+    if (cacheRead > 0 || cacheWrite > 0) {
+      return `${formatTokens(tokens)} tokens (+${formatTokens(cacheRead)} cached)`;
+    }
     return `${formatTokens(tokens)} tokens`;
   }
   if (tt === "sandbox_seconds" || tt === "walltime_seconds")

@@ -262,6 +262,10 @@ async def log_system_credential_cost(
                 # Use 'provider_cost_raw' — the value's unit varies by tracking
                 # type (USD for cost_usd, count for items/characters/per_run, etc.)
                 meta["provider_cost_raw"] = stats.provider_cost
+            if stats.cache_read_token_count:
+                meta["cache_read_tokens"] = stats.cache_read_token_count
+            if stats.cache_creation_token_count:
+                meta["cache_creation_tokens"] = stats.cache_creation_token_count
 
             _schedule_log(
                 db_client,
@@ -278,6 +282,8 @@ async def log_system_credential_cost(
                     cost_microdollars=cost_microdollars,
                     input_tokens=stats.input_token_count,
                     output_tokens=stats.output_token_count,
+                    cache_read_tokens=stats.cache_read_token_count or None,
+                    cache_creation_tokens=stats.cache_creation_token_count or None,
                     data_size=stats.output_size if stats.output_size > 0 else None,
                     duration=stats.walltime if stats.walltime > 0 else None,
                     model=model_name,
