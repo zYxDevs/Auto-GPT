@@ -1559,7 +1559,7 @@ async def stream_chat_completion_sdk(
 
         e2b_sandbox, (base_system_prompt, understanding), dl = await asyncio.gather(
             _setup_e2b(),
-            _build_cacheable_system_prompt(user_id),
+            _build_cacheable_system_prompt(user_id if not has_history else None),
             _fetch_transcript(),
         )
 

@@ -201,12 +201,16 @@ async def stream_chat_completion_baseline(
     # Inject user context into the first user message on first turn
     if is_first_turn and understanding:
         user_ctx = format_understanding_for_prompt(understanding)
+        injected = False
         for msg in openai_messages:
             if msg["role"] == "user":
                 msg["content"] = (
                     f"<user_context>\n{user_ctx}\n</user_context>\n\n{msg['content']}"
                 )
+                injected = True
                 break
+        if not injected:
+            logger.warning("[Baseline] No user message found for context injection")
 
     tools = get_available_tools()
 
