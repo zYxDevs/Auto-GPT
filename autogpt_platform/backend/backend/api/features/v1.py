@@ -744,6 +744,11 @@ async def update_subscription_tier(
         return SubscriptionCheckoutResponse(url="")
 
     # Paid upgrade → create Stripe Checkout Session.
+    if not request.success_url or not request.cancel_url:
+        raise HTTPException(
+            status_code=422,
+            detail="success_url and cancel_url are required for paid tier upgrades",
+        )
     try:
         url = await create_subscription_checkout(
             user_id=user_id,
@@ -751,7 +756,7 @@ async def update_subscription_tier(
             success_url=request.success_url,
             cancel_url=request.cancel_url,
         )
-    except ValueError as e:
+    except (ValueError, stripe.StripeError) as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     return SubscriptionCheckoutResponse(url=url)
