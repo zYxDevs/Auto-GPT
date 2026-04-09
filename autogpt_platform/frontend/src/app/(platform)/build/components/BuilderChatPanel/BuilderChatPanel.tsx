@@ -96,6 +96,7 @@ export function BuilderChatPanel({ className, isGraphLoaded }: Props) {
             onRetry={retrySession}
             seedMessageId={seedMessageId}
             messagesEndRef={messagesEndRef}
+            isStreaming={isStreaming}
           />
 
           <PanelInput
@@ -177,6 +178,7 @@ interface MessageListProps {
   onRetry: () => void;
   seedMessageId: string | null;
   messagesEndRef: React.RefObject<HTMLDivElement>;
+  isStreaming: boolean;
 }
 
 function MessageList({
@@ -191,11 +193,15 @@ function MessageList({
   onRetry,
   seedMessageId,
   messagesEndRef,
+  isStreaming,
 }: MessageListProps) {
   const visibleMessages = messages.filter(
     (msg) =>
       msg.id !== seedMessageId && Boolean(extractTextFromParts(msg.parts)),
   );
+  const lastVisibleRole = visibleMessages.at(-1)?.role;
+  const showTypingIndicator =
+    isStreaming && (!lastVisibleRole || lastVisibleRole === "user");
 
   return (
     <div
@@ -273,6 +279,20 @@ function MessageList({
           >
             {msg.role === "assistant" ? (
               <ReactMarkdown
+                allowedElements={[
+                  "p",
+                  "strong",
+                  "em",
+                  "code",
+                  "pre",
+                  "ul",
+                  "ol",
+                  "li",
+                  "blockquote",
+                  "a",
+                  "br",
+                ]}
+                unwrapDisallowed
                 components={{
                   p: ({ children }) => (
                     <p className="mb-1 last:mb-0">{children}</p>
@@ -287,16 +307,20 @@ function MessageList({
                       {children}
                     </pre>
                   ),
-                  a: ({ href, children }) => (
-                    <a
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline hover:no-underline"
-                    >
-                      {children}
-                    </a>
-                  ),
+                  a: ({ href, children }) => {
+                    const safeHref =
+                      href && /^https?:\/\//i.test(href) ? href : undefined;
+                    return (
+                      <a
+                        href={safeHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline hover:no-underline"
+                      >
+                        {children}
+                      </a>
+                    );
+                  },
                 }}
               >
                 {textParts}
@@ -307,6 +331,8 @@ function MessageList({
           </div>
         );
       })}
+
+      {showTypingIndicator && <TypingIndicator />}
 
       {parsedActions.length > 0 && (
         <ActionList
@@ -442,6 +468,16 @@ function PanelInput({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+function TypingIndicator() {
+  return (
+    <div className="flex max-w-[85%] items-center gap-1 rounded-lg bg-slate-100 px-3 py-3">
+      <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.3s]" />
+      <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.15s]" />
+      <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400" />
     </div>
   );
 }
