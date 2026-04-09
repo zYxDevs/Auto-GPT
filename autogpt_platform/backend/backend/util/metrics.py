@@ -1,8 +1,10 @@
 import logging
 from enum import Enum
 
-import sentry_sdk
 from pydantic import SecretStr
+from sentry_sdk._init_implementation import init as _sentry_init
+from sentry_sdk.api import capture_exception as _sentry_capture_exception
+from sentry_sdk.api import flush as _sentry_flush
 from sentry_sdk.integrations import DidNotEnable
 from sentry_sdk.integrations.asyncio import AsyncioIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
@@ -149,7 +151,7 @@ def sentry_init():
         if AnthropicIntegration is not None
         else []
     )
-    sentry_sdk.init(
+    _sentry_init(
         dsn=sentry_dsn,
         traces_sample_rate=1.0,
         profiles_sample_rate=1.0,
@@ -165,8 +167,8 @@ def sentry_init():
 
 
 def sentry_capture_error(error: BaseException):
-    sentry_sdk.capture_exception(error)
-    sentry_sdk.flush()
+    _sentry_capture_exception(error)
+    _sentry_flush()
 
 
 async def discord_send_alert(

@@ -163,7 +163,9 @@ class TestExceptionPropagation:
 
 class TestCacheTokenPropagation:
     @pytest.mark.asyncio
-    async def test_cache_tokens_propagated_to_stats(self):
+    async def test_cache_tokens_propagated_to_stats(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
         """cache_read_tokens and cache_creation_tokens must be forwarded to
         NodeExecutionStats so that usage dashboards count cached tokens."""
         block = AIConditionBlock()
@@ -176,7 +178,7 @@ class TestCacheTokenPropagation:
                 provider_cost=0.0012,
             )
 
-        block.llm_call = spy_llm  # type: ignore[assignment]
+        monkeypatch.setattr(block, "llm_call", spy_llm)
 
         input_data = _make_input()
         await _collect_outputs(block, input_data, credentials=TEST_CREDENTIALS)
