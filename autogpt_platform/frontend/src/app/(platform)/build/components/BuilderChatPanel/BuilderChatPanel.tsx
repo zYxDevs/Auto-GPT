@@ -16,6 +16,7 @@ import { MessagePartRenderer } from "@/app/(platform)/copilot/components/ChatMes
 import type { CustomNode } from "../FlowEditor/nodes/CustomNode/CustomNode";
 import {
   GraphAction,
+  SEED_PROMPT_PREFIX,
   extractTextFromParts,
   getActionKey,
   getNodeDisplayName,
@@ -199,12 +200,16 @@ function MessageList({
   messagesEndRef,
   isStreaming,
 }: MessageListProps) {
-  const visibleMessages = messages.filter(
-    (msg) =>
-      Boolean(extractTextFromParts(msg.parts)) ||
+  const visibleMessages = messages.filter((msg) => {
+    const text = extractTextFromParts(msg.parts);
+    if (msg.role === "user" && text.startsWith(SEED_PROMPT_PREFIX))
+      return false;
+    return (
+      Boolean(text) ||
       (msg.role === "assistant" &&
-        msg.parts?.some((p) => p.type === "dynamic-tool")),
-  );
+        msg.parts?.some((p) => p.type === "dynamic-tool"))
+    );
+  });
   const lastVisibleRole = visibleMessages.at(-1)?.role;
   const showTypingIndicator =
     isStreaming && (!lastVisibleRole || lastVisibleRole === "user");

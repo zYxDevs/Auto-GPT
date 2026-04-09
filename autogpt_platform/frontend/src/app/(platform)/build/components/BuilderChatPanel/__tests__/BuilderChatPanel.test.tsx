@@ -13,6 +13,7 @@ import {
   getNodeDisplayName,
   buildSeedPrompt,
   extractTextFromParts,
+  SEED_PROMPT_PREFIX,
 } from "../helpers";
 import type { CustomNode } from "../../FlowEditor/nodes/CustomNode/CustomNode";
 import type { CustomEdge } from "../../FlowEditor/edges/CustomEdge";
@@ -339,6 +340,34 @@ describe("BuilderChatPanel", () => {
     );
     render(<BuilderChatPanel />);
     expect(screen.queryByLabelText("Undo last applied change")).toBeNull();
+  });
+
+  it("hides the seed message from the chat UI", () => {
+    mockUseBuilderChatPanel.mockReturnValue(
+      makeMockHook({
+        isOpen: true,
+        messages: [
+          {
+            id: "seed",
+            role: "user",
+            parts: [
+              {
+                type: "text",
+                text: `${SEED_PROMPT_PREFIX} Here is the current graph...`,
+              },
+            ],
+          },
+          {
+            id: "reply",
+            role: "assistant",
+            parts: [{ type: "text", text: "I see you have an empty graph." }],
+          },
+        ] as ReturnType<typeof useBuilderChatPanel>["messages"],
+      }),
+    );
+    render(<BuilderChatPanel />);
+    expect(screen.queryByText(SEED_PROMPT_PREFIX, { exact: false })).toBeNull();
+    expect(screen.getByText("I see you have an empty graph.")).toBeDefined();
   });
 
   it("passes onGraphEdited and isGraphLoaded to useBuilderChatPanel", () => {
