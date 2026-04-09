@@ -200,12 +200,11 @@ class TestLLMStatsTracking:
         assert block.execution_stats.llm_retry_count == 1
 
     @pytest.mark.asyncio
-    async def test_retry_cost_uses_last_attempt_only(self):
-        """provider_cost is only merged from the final successful attempt.
+    async def test_retry_cost_accumulates_across_attempts(self):
+        """provider_cost accumulates across all retry attempts.
 
-        Intermediate retry costs are intentionally dropped to avoid
-        double-counting: the cost of failed attempts is captured in
-        last_attempt_cost only when the loop eventually succeeds.
+        Each LLM call incurs a real cost, including failed validation attempts.
+        The total cost is the sum of all attempts so no billed USD is lost.
         """
         import backend.blocks.llm as llm
 
@@ -253,8 +252,8 @@ class TestLLMStatsTracking:
             async for _ in block.run(input_data, credentials=llm.TEST_CREDENTIALS):
                 pass
 
-        # Only the final successful attempt's cost is merged
-        assert block.execution_stats.provider_cost == pytest.approx(0.02)
+        # provider_cost accumulates across all attempts: $0.01 + $0.02 = $0.03
+        assert block.execution_stats.provider_cost == pytest.approx(0.03)
         # Tokens from both attempts accumulate
         assert block.execution_stats.input_token_count == 30
         assert block.execution_stats.output_token_count == 15

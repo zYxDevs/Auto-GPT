@@ -191,8 +191,12 @@ class TestGetPlatformCostDashboard:
                 "request_count": 3,
             }
         ]
-        # Dashboard runs 3 queries: by_provider, by_user, COUNT(DISTINCT userId).
-        mock_query = AsyncMock(side_effect=[provider_rows, user_rows, [{"cnt": 1}]])
+        # Dashboard runs 4 queries: by_provider, by_user, COUNT(DISTINCT userId),
+        # and a separate total aggregate (total_cost + request_count with no LIMIT).
+        agg_rows = [{"total_cost": 5000, "request_count": 3}]
+        mock_query = AsyncMock(
+            side_effect=[provider_rows, user_rows, [{"cnt": 1}], agg_rows]
+        )
         with patch("backend.data.platform_cost.query_raw_with_schema", new=mock_query):
             dashboard = await get_platform_cost_dashboard()
         assert dashboard.total_cost_microdollars == 5000
@@ -207,7 +211,7 @@ class TestGetPlatformCostDashboard:
 
     @pytest.mark.asyncio
     async def test_returns_empty_dashboard(self):
-        mock_query = AsyncMock(side_effect=[[], [], []])
+        mock_query = AsyncMock(side_effect=[[], [], [], []])
         with patch("backend.data.platform_cost.query_raw_with_schema", new=mock_query):
             dashboard = await get_platform_cost_dashboard()
         assert dashboard.total_cost_microdollars == 0
@@ -219,12 +223,12 @@ class TestGetPlatformCostDashboard:
     @pytest.mark.asyncio
     async def test_passes_filters_to_queries(self):
         start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        mock_query = AsyncMock(side_effect=[[], [], []])
+        mock_query = AsyncMock(side_effect=[[], [], [], []])
         with patch("backend.data.platform_cost.query_raw_with_schema", new=mock_query):
             await get_platform_cost_dashboard(
                 start=start, provider="openai", user_id="u1"
             )
-        assert mock_query.await_count == 3
+        assert mock_query.await_count == 4
         first_call_sql = mock_query.call_args_list[0][0][0]
         assert "createdAt" in first_call_sql
 
