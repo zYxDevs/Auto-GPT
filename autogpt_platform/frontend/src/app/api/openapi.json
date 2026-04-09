@@ -55,6 +55,33 @@
               "anyOf": [{ "type": "string" }, { "type": "null" }],
               "title": "User Id"
             }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "Model"
+            }
+          },
+          {
+            "name": "block_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "Block Name"
+            }
+          },
+          {
+            "name": "tracking_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "Tracking Type"
+            }
           }
         ],
         "responses": {
@@ -153,6 +180,33 @@
               "default": 50,
               "title": "Page Size"
             }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "Model"
+            }
+          },
+          {
+            "name": "block_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "Block Name"
+            }
+          },
+          {
+            "name": "tracking_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "Tracking Type"
+            }
           }
         ],
         "responses": {
@@ -162,6 +216,108 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PlatformCostLogsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/HTTP401NotAuthenticatedError"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/platform-costs/logs/export": {
+      "get": {
+        "tags": ["v2", "admin", "platform-cost", "admin"],
+        "summary": "Export Platform Cost Logs",
+        "operationId": "getV2Export platform cost logs",
+        "security": [{ "HTTPBearerJWT": [] }],
+        "parameters": [
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "type": "string", "format": "date-time" },
+                { "type": "null" }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "type": "string", "format": "date-time" },
+                { "type": "null" }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "Provider"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "Model"
+            }
+          },
+          {
+            "name": "block_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "Block Name"
+            }
+          },
+          {
+            "name": "tracking_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [{ "type": "string" }, { "type": "null" }],
+              "title": "Tracking Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformCostExportResponse"
                 }
               }
             }
@@ -7473,81 +7629,6 @@
           }
         }
       }
-    },
-    "/api/admin/platform-costs/logs/export": {
-      "get": {
-        "tags": ["v2", "admin", "platform-cost", "admin"],
-        "summary": "Export Platform Cost Logs",
-        "operationId": "getV2Export platform cost logs",
-        "security": [{ "HTTPBearerJWT": [] }],
-        "parameters": [
-          {
-            "name": "start",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                { "type": "string", "format": "date-time" },
-                { "type": "null" }
-              ],
-              "title": "Start"
-            }
-          },
-          {
-            "name": "end",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                { "type": "string", "format": "date-time" },
-                { "type": "null" }
-              ],
-              "title": "End"
-            }
-          },
-          {
-            "name": "provider",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [{ "type": "string" }, { "type": "null" }],
-              "title": "Provider"
-            }
-          },
-          {
-            "name": "user_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [{ "type": "string" }, { "type": "null" }],
-              "title": "User Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlatformCostExportResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/HTTP401NotAuthenticatedError"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
@@ -9023,14 +9104,6 @@
             "anyOf": [{ "type": "integer" }, { "type": "null" }],
             "title": "Output Tokens"
           },
-          "cache_read_tokens": {
-            "anyOf": [{ "type": "integer" }, { "type": "null" }],
-            "title": "Cache Read Tokens"
-          },
-          "cache_creation_tokens": {
-            "anyOf": [{ "type": "integer" }, { "type": "null" }],
-            "title": "Cache Creation Tokens"
-          },
           "duration": {
             "anyOf": [{ "type": "number" }, { "type": "null" }],
             "title": "Duration"
@@ -9038,6 +9111,14 @@
           "model": {
             "anyOf": [{ "type": "string" }, { "type": "null" }],
             "title": "Model"
+          },
+          "cache_read_tokens": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Cache Read Tokens"
+          },
+          "cache_creation_tokens": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Cache Creation Tokens"
           }
         },
         "type": "object",
@@ -9293,7 +9374,14 @@
       },
       "CreditTransactionType": {
         "type": "string",
-        "enum": ["TOP_UP", "USAGE", "GRANT", "REFUND", "CARD_CHECK"],
+        "enum": [
+          "TOP_UP",
+          "USAGE",
+          "GRANT",
+          "REFUND",
+          "CARD_CHECK",
+          "SUBSCRIPTION"
+        ],
         "title": "CreditTransactionType"
       },
       "DeleteFileResponse": {
@@ -12003,6 +12091,20 @@
           "total_users"
         ],
         "title": "PlatformCostDashboard"
+      },
+      "PlatformCostExportResponse": {
+        "properties": {
+          "logs": {
+            "items": { "$ref": "#/components/schemas/CostLogRow" },
+            "type": "array",
+            "title": "Logs"
+          },
+          "total_rows": { "type": "integer", "title": "Total Rows" },
+          "truncated": { "type": "boolean", "title": "Truncated" }
+        },
+        "type": "object",
+        "required": ["logs", "total_rows", "truncated"],
+        "title": "PlatformCostExportResponse"
       },
       "PlatformCostLogsResponse": {
         "properties": {
@@ -15724,9 +15826,7 @@
             "title": "Location"
           },
           "msg": { "type": "string", "title": "Message" },
-          "type": { "type": "string", "title": "Error Type" },
-          "input": { "title": "Input" },
-          "ctx": { "type": "object", "title": "Context" }
+          "type": { "type": "string", "title": "Error Type" }
         },
         "type": "object",
         "required": ["loc", "msg", "type"],
@@ -15829,20 +15929,6 @@
           "expires_in_hours"
         ],
         "title": "UploadFileResponse"
-      },
-      "PlatformCostExportResponse": {
-        "properties": {
-          "logs": {
-            "items": { "$ref": "#/components/schemas/CostLogRow" },
-            "type": "array",
-            "title": "Logs"
-          },
-          "total_rows": { "type": "integer", "title": "Total Rows" },
-          "truncated": { "type": "boolean", "title": "Truncated" }
-        },
-        "type": "object",
-        "required": ["logs", "total_rows", "truncated"],
-        "title": "PlatformCostExportResponse"
       }
     },
     "securitySchemes": {

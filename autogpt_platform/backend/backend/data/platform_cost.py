@@ -175,6 +175,9 @@ def _build_where(
     provider: str | None,
     user_id: str | None,
     table_alias: str = "",
+    model: str | None = None,
+    block_name: str | None = None,
+    tracking_type: str | None = None,
 ) -> tuple[str, list[Any]]:
     prefix = f"{table_alias}." if table_alias else ""
     clauses: list[str] = []
@@ -199,6 +202,18 @@ def _build_where(
         clauses.append(f'{prefix}"userId" = ${idx}')
         params.append(user_id)
         idx += 1
+    if model:
+        clauses.append(f'{prefix}"model" = ${idx}')
+        params.append(model)
+        idx += 1
+    if block_name:
+        clauses.append(f'LOWER({prefix}"blockName") = LOWER(${idx})')
+        params.append(block_name)
+        idx += 1
+    if tracking_type:
+        clauses.append(f'{prefix}"trackingType" = ${idx}')
+        params.append(tracking_type)
+        idx += 1
 
     return (" AND ".join(clauses) if clauses else "TRUE", params)
 
@@ -209,6 +224,9 @@ async def get_platform_cost_dashboard(
     end: datetime | None = None,
     provider: str | None = None,
     user_id: str | None = None,
+    model: str | None = None,
+    block_name: str | None = None,
+    tracking_type: str | None = None,
 ) -> PlatformCostDashboard:
     """Aggregate platform cost logs for the admin dashboard.
 
@@ -223,7 +241,9 @@ async def get_platform_cost_dashboard(
     """
     if start is None:
         start = datetime.now(timezone.utc) - timedelta(days=DEFAULT_DASHBOARD_DAYS)
-    where_p, params_p = _build_where(start, end, provider, user_id, "p")
+    where_p, params_p = _build_where(
+        start, end, provider, user_id, "p", model, block_name, tracking_type
+    )
 
     by_provider_rows, by_user_rows, total_user_rows, total_agg_rows = (
         await asyncio.gather(
@@ -339,10 +359,15 @@ async def get_platform_cost_logs(
     user_id: str | None = None,
     page: int = 1,
     page_size: int = 50,
+    model: str | None = None,
+    block_name: str | None = None,
+    tracking_type: str | None = None,
 ) -> tuple[list[CostLogRow], int]:
     if start is None:
         start = datetime.now(tz=timezone.utc) - timedelta(days=DEFAULT_DASHBOARD_DAYS)
-    where_sql, params = _build_where(start, end, provider, user_id, "p")
+    where_sql, params = _build_where(
+        start, end, provider, user_id, "p", model, block_name, tracking_type
+    )
 
     offset = (page - 1) * page_size
     limit_idx = len(params) + 1
@@ -421,6 +446,9 @@ async def get_platform_cost_logs_for_export(
     end: datetime | None = None,
     provider: str | None = None,
     user_id: str | None = None,
+    model: str | None = None,
+    block_name: str | None = None,
+    tracking_type: str | None = None,
 ) -> tuple[list[CostLogRow], bool]:
     """Return all matching rows up to EXPORT_MAX_ROWS.
 
@@ -429,7 +457,9 @@ async def get_platform_cost_logs_for_export(
     """
     if start is None:
         start = datetime.now(tz=timezone.utc) - timedelta(days=DEFAULT_DASHBOARD_DAYS)
-    where_sql, params = _build_where(start, end, provider, user_id, "p")
+    where_sql, params = _build_where(
+        start, end, provider, user_id, "p", model, block_name, tracking_type
+    )
     limit_idx = len(params) + 1
 
     rows = await query_raw_with_schema(

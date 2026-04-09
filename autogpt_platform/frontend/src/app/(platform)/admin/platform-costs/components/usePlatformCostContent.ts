@@ -20,6 +20,9 @@ interface InitialSearchParams {
   end?: string;
   provider?: string;
   user_id?: string;
+  model?: string;
+  block_name?: string;
+  tracking_type?: string;
   page?: string;
   tab?: string;
 }
@@ -35,11 +38,19 @@ export function usePlatformCostContent(searchParams: InitialSearchParams) {
   const providerFilter =
     urlParams.get("provider") || searchParams.provider || "";
   const userFilter = urlParams.get("user_id") || searchParams.user_id || "";
+  const modelFilter = urlParams.get("model") || searchParams.model || "";
+  const blockFilter =
+    urlParams.get("block_name") || searchParams.block_name || "";
+  const typeFilter =
+    urlParams.get("tracking_type") || searchParams.tracking_type || "";
 
   const [startInput, setStartInput] = useState(toLocalInput(startDate));
   const [endInput, setEndInput] = useState(toLocalInput(endDate));
   const [providerInput, setProviderInput] = useState(providerFilter);
   const [userInput, setUserInput] = useState(userFilter);
+  const [modelInput, setModelInput] = useState(modelFilter);
+  const [blockInput, setBlockInput] = useState(blockFilter);
+  const [typeInput, setTypeInput] = useState(typeFilter);
   const [rateOverrides, setRateOverrides] = useState<Record<string, number>>(
     {},
   );
@@ -53,6 +64,9 @@ export function usePlatformCostContent(searchParams: InitialSearchParams) {
     end: (endDate || undefined) as unknown as Date | undefined,
     provider: providerFilter || undefined,
     user_id: userFilter || undefined,
+    model: modelFilter || undefined,
+    block_name: blockFilter || undefined,
+    tracking_type: typeFilter || undefined,
   };
 
   const {
@@ -98,6 +112,9 @@ export function usePlatformCostContent(searchParams: InitialSearchParams) {
       end: toUtcIso(endInput),
       provider: providerInput,
       user_id: userInput,
+      model: modelInput,
+      block_name: blockInput,
+      tracking_type: typeInput,
       page: "1",
     });
   }
@@ -162,6 +179,12 @@ export function usePlatformCostContent(searchParams: InitialSearchParams) {
     setProviderInput,
     userInput,
     setUserInput,
+    modelInput,
+    setModelInput,
+    blockInput,
+    setBlockInput,
+    typeInput,
+    setTypeInput,
     rateOverrides,
     handleRateOverride,
     updateUrl,
