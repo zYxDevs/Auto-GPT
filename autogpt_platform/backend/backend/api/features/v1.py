@@ -802,6 +802,7 @@ async def stripe_webhook(request: Request):
         await UserCredit().fulfill_checkout(session_id=event["data"]["object"]["id"])
 
     if event["type"] in (
+        "customer.subscription.created",
         "customer.subscription.updated",
         "customer.subscription.deleted",
     ):
