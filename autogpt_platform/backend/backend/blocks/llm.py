@@ -738,6 +738,8 @@ class LLMResponse(BaseModel):
     tool_calls: Optional[List[ToolContentBlock]] | None
     prompt_tokens: int
     completion_tokens: int
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
     reasoning: Optional[str] = None
     provider_cost: float | None = None
 
@@ -1046,6 +1048,11 @@ async def llm_call(
             tool_calls=tool_calls,
             prompt_tokens=resp.usage.input_tokens,
             completion_tokens=resp.usage.output_tokens,
+            cache_read_tokens=getattr(resp.usage, "cache_read_input_tokens", None) or 0,
+            cache_creation_tokens=getattr(
+                resp.usage, "cache_creation_input_tokens", None
+            )
+            or 0,
             reasoning=reasoning,
         )
     elif provider == "groq":
@@ -1443,7 +1450,7 @@ class AIStructuredResponseGeneratorBlock(AIBlockBase):
 
         error_feedback_message = ""
         llm_model = input_data.model
-        last_attempt_cost: float | None = None
+        total_provider_cost: float | None = None
 
         for retry_count in range(input_data.retry):
             logger.debug(f"LLM request: {prompt}")
@@ -1461,15 +1468,19 @@ class AIStructuredResponseGeneratorBlock(AIBlockBase):
                     max_tokens=input_data.max_tokens,
                 )
                 response_text = llm_response.response
-                # Merge token counts for every attempt (each call costs tokens).
-                # provider_cost (actual USD) is tracked separately and only merged
-                # on success to avoid double-counting across retries.
+                # Accumulate token counts and provider_cost for every attempt
+                # (each call costs tokens and USD, regardless of validation outcome).
                 token_stats = NodeExecutionStats(
                     input_token_count=llm_response.prompt_tokens,
                     output_token_count=llm_response.completion_tokens,
+                    cache_read_token_count=llm_response.cache_read_tokens,
+                    cache_creation_token_count=llm_response.cache_creation_tokens,
                 )
                 self.merge_stats(token_stats)
-                last_attempt_cost = llm_response.provider_cost
+                if llm_response.provider_cost is not None:
+                    total_provider_cost = (
+                        total_provider_cost or 0.0
+                    ) + llm_response.provider_cost
                 logger.debug(f"LLM attempt-{retry_count} response: {response_text}")
 
                 if input_data.expected_format:
@@ -1538,7 +1549,7 @@ class AIStructuredResponseGeneratorBlock(AIBlockBase):
                             NodeExecutionStats(
                                 llm_call_count=retry_count + 1,
                                 llm_retry_count=retry_count,
-                                provider_cost=last_attempt_cost,
+                                provider_cost=total_provider_cost,
                             )
                         )
                         yield "response", response_obj
@@ -1559,7 +1570,7 @@ class AIStructuredResponseGeneratorBlock(AIBlockBase):
                         NodeExecutionStats(
                             llm_call_count=retry_count + 1,
                             llm_retry_count=retry_count,
-                            provider_cost=last_attempt_cost,
+                            provider_cost=total_provider_cost,
                         )
                     )
                     yield "response", {"response": response_text}
@@ -1591,6 +1602,10 @@ class AIStructuredResponseGeneratorBlock(AIBlockBase):
 
                 error_feedback_message = f"Error calling LLM: {e}"
 
+        # All retries exhausted or user-error break: persist accumulated cost so
+        # the executor can still charge/report the spend even on failure.
+        if total_provider_cost is not None:
+            self.merge_stats(NodeExecutionStats(provider_cost=total_provider_cost))
         raise RuntimeError(error_feedback_message)
 
     def response_format_instructions(
