@@ -774,6 +774,7 @@ enum CreditTransactionType {
   GRANT
   REFUND
   CARD_CHECK
+  SUBSCRIPTION
 }
 
 model CreditTransaction {

@@ -2171,6 +2171,68 @@
         }
       }
     },
+    "/api/credits/subscription": {
+      "get": {
+        "tags": ["v1", "credits"],
+        "summary": "Get subscription tier, current cost, and all tier costs",
+        "operationId": "getSubscriptionStatus",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/HTTP401NotAuthenticatedError"
+          }
+        },
+        "security": [{ "HTTPBearerJWT": [] }]
+      },
+      "post": {
+        "tags": ["v1", "credits"],
+        "summary": "Start a Stripe Checkout session to upgrade subscription tier",
+        "operationId": "updateSubscriptionTier",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionTierRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionCheckoutResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/HTTP401NotAuthenticatedError"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        },
+        "security": [{ "HTTPBearerJWT": [] }]
+      }
+    },
     "/api/credits/transactions": {
       "get": {
         "tags": ["v1", "credits"],
@@ -9209,7 +9271,14 @@
       },
       "CreditTransactionType": {
         "type": "string",
-        "enum": ["TOP_UP", "USAGE", "GRANT", "REFUND", "CARD_CHECK"],
+        "enum": [
+          "TOP_UP",
+          "USAGE",
+          "GRANT",
+          "REFUND",
+          "CARD_CHECK",
+          "SUBSCRIPTION"
+        ],
         "title": "CreditTransactionType"
       },
       "DeleteFileResponse": {
@@ -13622,11 +13691,53 @@
         "enum": ["DRAFT", "PENDING", "APPROVED", "REJECTED"],
         "title": "SubmissionStatus"
       },
+      "SubscriptionCheckoutResponse": {
+        "properties": { "url": { "type": "string", "title": "Url" } },
+        "type": "object",
+        "required": ["url"],
+        "title": "SubscriptionCheckoutResponse"
+      },
+      "SubscriptionStatusResponse": {
+        "properties": {
+          "tier": { "type": "string", "title": "Tier" },
+          "monthly_cost": { "type": "integer", "title": "Monthly Cost" },
+          "tier_costs": {
+            "additionalProperties": { "type": "integer" },
+            "type": "object",
+            "title": "Tier Costs"
+          }
+        },
+        "type": "object",
+        "required": ["tier", "monthly_cost", "tier_costs"],
+        "title": "SubscriptionStatusResponse"
+      },
       "SubscriptionTier": {
         "type": "string",
         "enum": ["FREE", "PRO", "BUSINESS", "ENTERPRISE"],
         "title": "SubscriptionTier",
         "description": "Subscription tiers with increasing token allowances.\n\nMirrors the ``SubscriptionTier`` enum in ``schema.prisma``.\nOnce ``prisma generate`` is run, this can be replaced with::\n\n    from prisma.enums import SubscriptionTier"
+      },
+      "SubscriptionTierRequest": {
+        "properties": {
+          "tier": {
+            "type": "string",
+            "enum": ["FREE", "PRO", "BUSINESS"],
+            "title": "Tier"
+          },
+          "success_url": {
+            "type": "string",
+            "title": "Success Url",
+            "default": ""
+          },
+          "cancel_url": {
+            "type": "string",
+            "title": "Cancel Url",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": ["tier"],
+        "title": "SubscriptionTierRequest"
       },
       "SuggestedGoalResponse": {
         "properties": {
