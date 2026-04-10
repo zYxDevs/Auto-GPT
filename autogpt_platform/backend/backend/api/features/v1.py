@@ -54,6 +54,7 @@ from backend.data.credit import (
     cancel_stripe_subscription,
     create_subscription_checkout,
     get_auto_top_up,
+    get_subscription_price_id,
     get_user_credit_model,
     set_auto_top_up,
     set_subscription_tier,
@@ -715,10 +716,27 @@ async def get_subscription_status(
 ) -> SubscriptionStatusResponse:
     user = await get_user_by_id(user_id)
     tier = user.subscription_tier or SubscriptionTier.FREE
+
+    paid_tiers = [SubscriptionTier.PRO, SubscriptionTier.BUSINESS]
+    price_ids = await asyncio.gather(
+        *[get_subscription_price_id(t) for t in paid_tiers]
+    )
+
+    tier_costs: dict[str, int] = {"FREE": 0, "ENTERPRISE": 0}
+    for t, price_id in zip(paid_tiers, price_ids):
+        cost = 0
+        if price_id:
+            try:
+                price = await run_in_threadpool(stripe.Price.retrieve, price_id)
+                cost = price.unit_amount or 0
+            except stripe.StripeError:
+                pass
+        tier_costs[t.value] = cost
+
     return SubscriptionStatusResponse(
         tier=tier.value,
-        monthly_cost=0,
-        tier_costs={"FREE": 0, "PRO": 0, "BUSINESS": 0, "ENTERPRISE": 0},
+        monthly_cost=tier_costs.get(tier.value, 0),
+        tier_costs=tier_costs,
     )
 
 

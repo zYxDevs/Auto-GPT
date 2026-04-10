@@ -32,16 +32,30 @@ def teardown_auth(app: fastapi.FastAPI):
 def test_get_subscription_status_pro(
     mocker: pytest_mock.MockFixture,
 ) -> None:
-    """GET /credits/subscription returns PRO tier for a PRO user."""
+    """GET /credits/subscription returns PRO tier with Stripe price for a PRO user."""
     setup_auth(app)
     try:
         mock_user = Mock()
         mock_user.subscription_tier = SubscriptionTier.PRO
 
+        mock_price = Mock()
+        mock_price.unit_amount = 1999  # $19.99
+
+        async def mock_price_id(tier: SubscriptionTier) -> str | None:
+            return "price_pro" if tier == SubscriptionTier.PRO else None
+
         mocker.patch(
             "backend.api.features.v1.get_user_by_id",
             new_callable=AsyncMock,
             return_value=mock_user,
+        )
+        mocker.patch(
+            "backend.api.features.v1.get_subscription_price_id",
+            side_effect=mock_price_id,
+        )
+        mocker.patch(
+            "backend.api.features.v1.stripe.Price.retrieve",
+            return_value=mock_price,
         )
 
         response = client.get("/credits/subscription")
@@ -49,8 +63,10 @@ def test_get_subscription_status_pro(
         assert response.status_code == 200
         data = response.json()
         assert data["tier"] == "PRO"
-        assert "monthly_cost" in data
-        assert "tier_costs" in data
+        assert data["monthly_cost"] == 1999
+        assert data["tier_costs"]["PRO"] == 1999
+        assert data["tier_costs"]["BUSINESS"] == 0
+        assert data["tier_costs"]["FREE"] == 0
     finally:
         teardown_auth(app)
 
@@ -69,12 +85,24 @@ def test_get_subscription_status_defaults_to_free(
             new_callable=AsyncMock,
             return_value=mock_user,
         )
+        mocker.patch(
+            "backend.api.features.v1.get_subscription_price_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        )
 
         response = client.get("/credits/subscription")
 
         assert response.status_code == 200
         data = response.json()
         assert data["tier"] == SubscriptionTier.FREE.value
+        assert data["monthly_cost"] == 0
+        assert data["tier_costs"] == {
+            "FREE": 0,
+            "PRO": 0,
+            "BUSINESS": 0,
+            "ENTERPRISE": 0,
+        }
     finally:
         teardown_auth(app)
 
