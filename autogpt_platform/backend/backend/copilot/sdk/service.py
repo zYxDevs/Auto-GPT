@@ -2370,6 +2370,7 @@ async def stream_chat_completion_sdk(
     turn_cache_creation_tokens = 0
     turn_cost_usd: float | None = None
     graphiti_enabled = False
+    pre_attempt_msg_count = 0
     # Defaults ensure the finally block can always reference these safely even when
     # an early return (e.g. sdk_cwd error) skips their normal assignment below.
     sdk_model: str | None = None
@@ -2788,6 +2789,9 @@ async def stream_chat_completion_sdk(
         if attachments.hint:
             query_message = f"{query_message}\n\n{attachments.hint}"
 
+        # warm_ctx is injected via inject_user_context above (warm_ctx= kwarg).
+        # No separate injection needed here.
+
         # When running without --resume and no prior transcript in storage,
         # seed the transcript builder from compressed DB messages so that
         # upload_transcript saves a compact version for future turns.
@@ -2937,6 +2941,8 @@ async def stream_chat_completion_sdk(
                 )
                 if attachments.hint:
                     state.query_message = f"{state.query_message}\n\n{attachments.hint}"
+                # warm_ctx is already baked into current_message via
+                # inject_user_context — no separate injection needed.
                 state.adapter = SDKResponseAdapter(
                     message_id=message_id, session_id=session_id
                 )
@@ -3341,8 +3347,21 @@ async def stream_chat_completion_sdk(
         if graphiti_enabled and user_id and message and is_user_message:
             from ..graphiti.ingest import enqueue_conversation_turn
 
+            # Extract last assistant message from THIS TURN only (not all
+            # session history) to avoid distilling stale content from prior
+            # turns when the current turn errors before producing output.
+            _this_turn_msgs = (
+                session.messages[pre_attempt_msg_count:] if session else []
+            )
+            _assistant_msgs = [
+                m.content or "" for m in _this_turn_msgs if m.role == "assistant"
+            ]
+            _last_assistant = _assistant_msgs[-1] if _assistant_msgs else ""
+
             _ingest_task = asyncio.create_task(
-                enqueue_conversation_turn(user_id, session_id, message)
+                enqueue_conversation_turn(
+                    user_id, session_id, message, assistant_msg=_last_assistant
+                )
             )
             _background_tasks.add(_ingest_task)
             _ingest_task.add_done_callback(_background_tasks.discard)
