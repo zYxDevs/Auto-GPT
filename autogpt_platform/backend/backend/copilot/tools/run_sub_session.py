@@ -8,7 +8,7 @@ Mirror-image of ``run_agent`` + ``view_agent_output`` for copilot turns:
    ``CoPilotExecutionEntry``, and waits on the Redis stream until the
    terminal event arrives or the cap fires.
 2. Any available ``copilot_executor`` worker claims the job, runs
-   ``collect_copilot_response`` to completion, and publishes the final
+   the SDK stream to completion, and publishes the final
    ``StreamFinish`` event on the session's Redis stream.
 3. If the terminal event arrives in the wait window, the aggregated
    :class:`SessionResult` (response text, tool calls, usage) comes back
@@ -85,9 +85,7 @@ class RunSubSessionTool(BaseTool):
                 },
                 "sub_autopilot_session_id": {
                     "type": "string",
-                    "description": (
-                        "Continue a prior sub via its session_id; empty = new."
-                    ),
+                    "description": ("Continue/queue-into a prior sub; empty = new."),
                     "default": "",
                 },
                 "wait_for_result": {
@@ -197,8 +195,28 @@ def response_from_outcome(
     ``completed`` surfaces the aggregated response text + tool calls.
     ``failed`` returns the error marker with the same handles.
     ``running`` returns just the polling handles so the agent can resume.
+    ``queued`` means the target session already had a turn in flight; the
+    message was appended to its pending buffer and will be processed by
+    the existing turn on its next drain.
     """
     link = _sub_session_link(inner_session_id)
+    if outcome == "queued":
+        return SubSessionStatusResponse(
+            message=(
+                f"Target session already had a turn in flight; the message "
+                f"was queued ({result.pending_buffer_length} now pending) and "
+                "will be processed by the existing turn on its next drain. "
+                f"Call get_sub_session_result to poll progress"
+                f"{f' or watch live at {link}' if link else ''}."
+            ),
+            session_id=parent_session_id,
+            status="queued",
+            sub_session_id=inner_session_id,
+            sub_autopilot_session_id=inner_session_id,
+            sub_autopilot_session_link=link,
+            elapsed_seconds=round(elapsed, 2),
+        )
+
     if outcome == "running":
         return SubSessionStatusResponse(
             message=(

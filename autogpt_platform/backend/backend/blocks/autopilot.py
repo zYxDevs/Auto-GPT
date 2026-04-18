@@ -356,6 +356,10 @@ class AutoPilotBlock(Block):
                 )
 
             # Build a lightweight conversation summary from the aggregated data.
+            # When ``result.queued`` is True the prompt rode on an already-
+            # in-flight turn (``run_copilot_turn_via_queue`` queued it and
+            # waited on the existing turn's stream); the aggregated result
+            # is still valid, so the same rendering path applies.
             turn_messages: list[dict[str, Any]] = [
                 {"role": "user", "content": effective_prompt},
             ]

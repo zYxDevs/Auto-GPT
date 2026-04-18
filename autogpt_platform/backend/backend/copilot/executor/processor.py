@@ -346,7 +346,9 @@ class CoPilotProcessor:
 
             # Stream chat completion and publish chunks to Redis.
             # stream_and_publish wraps the raw stream with registry
-            # publishing (shared with collect_copilot_response).
+            # publishing so subscribers on the session Redis stream
+            # (e.g. wait_for_session_result, SSE clients) receive the
+            # same events as they are produced.
             raw_stream = stream_fn(
                 session_id=entry.session_id,
                 message=entry.message if entry.message else None,
@@ -357,6 +359,7 @@ class CoPilotProcessor:
                 mode=effective_mode,
                 model=entry.model,
                 permissions=entry.permissions,
+                request_arrival_at=entry.request_arrival_at,
             )
             async for chunk in stream_registry.stream_and_publish(
                 session_id=entry.session_id,

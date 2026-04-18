@@ -968,3 +968,53 @@ class TestStripLlmFields:
         stashed = pop_pending_tool_output("fake_tool_normal")
         assert stashed is not None
         assert '"is_dry_run": true' in stashed
+
+
+class TestTruncatingWrapperLeavesOutputUntouched:
+    """Mid-turn drain moved to the shared ``PostToolUse`` hook path so every
+    tool (MCP + built-in) is covered uniformly.  The wrapper must therefore
+    forward tool output verbatim and never touch ``<user_follow_up>``."""
+
+    @pytest.mark.asyncio
+    async def test_wrapper_does_not_inject_followup(self):
+        session = MagicMock()
+        session.dry_run = False
+        session.session_id = "sess-no-inject"
+        set_execution_context(user_id="u", session=session, sandbox=None, sdk_cwd="/tmp/test")  # type: ignore[arg-type]
+
+        async def fake_tool_fn(_args: dict) -> dict:
+            return {
+                "content": [{"type": "text", "text": "CLEAN_OUTPUT"}],
+                "isError": False,
+            }
+
+        wrapper = _make_truncating_wrapper(fake_tool_fn, "fake_tool_clean")
+        result = await wrapper({})
+
+        text = result["content"][0]["text"]
+        assert text == "CLEAN_OUTPUT"
+        assert "<user_follow_up>" not in text
+
+    @pytest.mark.asyncio
+    async def test_stash_stays_clean(self):
+        """The frontend-facing stash must be a byte-for-byte copy of the
+        raw tool output (needed for JSON.parse in the bash widget)."""
+        session = MagicMock()
+        session.dry_run = False
+        session.session_id = "sess-stash"
+        set_execution_context(user_id="u", session=session, sandbox=None, sdk_cwd="/tmp/test")  # type: ignore[arg-type]
+
+        clean_json = '{"stdout": "hello\\n", "exit_code": 0}'
+
+        async def fake_tool_fn(_args: dict) -> dict:
+            return {
+                "content": [{"type": "text", "text": clean_json}],
+                "isError": False,
+            }
+
+        wrapper = _make_truncating_wrapper(fake_tool_fn, "fake_tool_stash_pure")
+        await wrapper({})
+
+        stashed = pop_pending_tool_output("fake_tool_stash_pure")
+        assert stashed == clean_json
+        assert "<user_follow_up>" not in (stashed or "")

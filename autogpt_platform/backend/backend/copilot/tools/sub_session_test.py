@@ -4,7 +4,7 @@ Sub-AutoPilots are enqueued on the copilot_execution RabbitMQ queue and
 executed by any copilot_executor worker. The tools wait for completion
 by subscribing to ``stream_registry`` for the sub's ChatSession. These
 tests patch the three integration seams — ``enqueue_copilot_turn``,
-``wait_for_session_completion``, and ``stream_registry.create_session``
+``wait_for_session_result``, and ``stream_registry.create_session``
 — to exercise the tool logic without needing RabbitMQ or Redis.
 """
 
@@ -260,6 +260,29 @@ class TestRunSubSession:
         assert r.tool_calls is not None and len(r.tool_calls) == 1
         assert r.tool_calls[0]["tool_name"] == "foo"
         mock_waiter.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_queued_outcome_surfaces_queued_status(
+        self, mock_queue, mock_waiter, mock_model
+    ):
+        """When the shared primitive reports the target session already has
+        a turn running, the tool surfaces ``status='queued'`` so the LLM can
+        decide whether to poll or move on."""
+        from backend.copilot.sdk.session_waiter import SessionResult
+
+        queued_res = SessionResult(queued=True, pending_buffer_length=2)
+        mock_waiter.return_value = ("queued", queued_res)
+
+        r = await RunSubSessionTool()._execute(
+            user_id="alice",
+            session=_session("alice"),
+            prompt="please do another thing",
+            wait_for_result=0,
+        )
+        assert isinstance(r, SubSessionStatusResponse)
+        assert r.status == "queued"
+        assert r.sub_session_id == "inner-1"
+        assert "queued" in (r.message or "").lower()
 
     @pytest.mark.asyncio
     async def test_wait_clamps_above_maximum(self, mock_queue, mock_waiter, mock_model):

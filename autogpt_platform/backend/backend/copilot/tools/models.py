@@ -287,8 +287,13 @@ class SubSessionStatusResponse(ToolResponseBase):
     """
 
     type: ResponseType = ResponseType.MCP_TOOL_OUTPUT
-    status: Literal["running", "completed", "cancelled", "error"] = Field(
-        description="Current state of the sub-AutoPilot run.",
+    status: Literal["running", "completed", "cancelled", "error", "queued"] = Field(
+        description=(
+            "Current state of the sub-AutoPilot run.  ``queued`` means the "
+            "target session already had a turn in flight, so the message was "
+            "pushed onto its pending buffer and will be picked up by the "
+            "existing turn on its next drain."
+        ),
     )
     sub_session_id: str = Field(
         description=(
