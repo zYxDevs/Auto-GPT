@@ -120,6 +120,7 @@ from backend.data.workspace import (
     list_workspace_files,
     soft_delete_workspace_file,
 )
+from backend.platform_linking import db as platform_linking_db
 from backend.util.service import (
     AppService,
     AppServiceClient,
@@ -338,6 +339,22 @@ class DatabaseManager(AppService):
     # ============ Platform Cost Tracking ============ #
     log_platform_cost = _(log_platform_cost)
 
+    # ============ Platform Linking ============ #
+    find_server_link_owner = _(platform_linking_db.find_server_link_owner)
+    find_user_link_owner = _(platform_linking_db.find_user_link_owner)
+    resolve_server_link = _(platform_linking_db.resolve_server_link)
+    resolve_user_link = _(platform_linking_db.resolve_user_link)
+    create_server_link_token = _(platform_linking_db.create_server_link_token)
+    create_user_link_token = _(platform_linking_db.create_user_link_token)
+    get_link_token_status = _(platform_linking_db.get_link_token_status)
+    get_link_token_info = _(platform_linking_db.get_link_token_info)
+    confirm_server_link = _(platform_linking_db.confirm_server_link)
+    confirm_user_link = _(platform_linking_db.confirm_user_link)
+    list_server_links = _(platform_linking_db.list_server_links)
+    list_user_links = _(platform_linking_db.list_user_links)
+    delete_server_link = _(platform_linking_db.delete_server_link)
+    delete_user_link = _(platform_linking_db.delete_user_link)
+
     # ============ CoPilot Chat Sessions ============ #
     get_chat_session = _(chat_db.get_chat_session)
     create_chat_session = _(chat_db.create_chat_session)
@@ -539,6 +556,22 @@ class DatabaseManagerAsyncClient(AppServiceClient):
 
     # ============ Platform Cost Tracking ============ #
     log_platform_cost = d.log_platform_cost
+
+    # ============ Platform Linking ============ #
+    find_server_link_owner = d.find_server_link_owner
+    find_user_link_owner = d.find_user_link_owner
+    resolve_server_link = d.resolve_server_link
+    resolve_user_link = d.resolve_user_link
+    create_server_link_token = d.create_server_link_token
+    create_user_link_token = d.create_user_link_token
+    get_link_token_status = d.get_link_token_status
+    get_link_token_info = d.get_link_token_info
+    confirm_server_link = d.confirm_server_link
+    confirm_user_link = d.confirm_user_link
+    list_server_links = d.list_server_links
+    list_user_links = d.list_user_links
+    delete_server_link = d.delete_server_link
+    delete_user_link = d.delete_user_link
 
     # ============ CoPilot Chat Sessions ============ #
     get_chat_session = d.get_chat_session
