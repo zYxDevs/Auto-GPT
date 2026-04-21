@@ -836,16 +836,25 @@ def _is_fallback_stderr(line: str) -> bool:
 
 def _build_system_prompt_value(
     system_prompt: str,
+    *,
     cross_user_cache: bool,
 ) -> str | SystemPromptPreset:
     """Build the ``system_prompt`` argument for :class:`ClaudeAgentOptions`.
 
     When *cross_user_cache* is enabled, returns a :class:`SystemPromptPreset`
-    dict so the Claude Code default prompt becomes a cacheable prefix shared
-    across all users; our custom *system_prompt* is appended after it.
+    with ``exclude_dynamic_sections=True`` so every turn — Turn 1 *and*
+    resumed turns — shares the same static prefix and hits the cross-user
+    prompt cache.  Our custom *system_prompt* is appended after the preset.
 
-    When disabled (or if the SDK is too old to support ``SystemPromptPreset``),
-    the raw *system_prompt* string is returned unchanged.
+    Requires CLI ≥ 2.1.98 (older CLIs crash when ``excludeDynamicSections``
+    is combined with ``--resume``).  The SDK bundles CLI 2.1.116 at
+    ``claude-agent-sdk >= 0.1.64``, so the pin in ``pyproject.toml`` is
+    the single source of truth — no external install needed.
+
+    When *cross_user_cache* is disabled, the raw *system_prompt* string is
+    returned.  Note this causes the CLI to REPLACE its built-in prompt via
+    ``--system-prompt`` (vs ``--append-system-prompt`` for the preset),
+    which loses Claude Code's default prompt and its cache markers entirely.
 
     An empty *system_prompt* is accepted: the preset dict will have
     ``append: ""`` which the SDK treats as no custom suffix.
@@ -3036,15 +3045,17 @@ async def stream_chat_completion_sdk(
                     sid,
                 )
 
-        # Use SystemPromptPreset for cross-user prompt caching.
-        # WORKAROUND: CLI 2.1.97 (sdk 0.1.58) exits code 1 when
-        # excludeDynamicSections=True is in the initialize request AND
-        # --resume is active.  Disable the preset on resumed turns.
-        # Turn 1 still gets the preset (no --resume).
-        _cross_user = config.claude_agent_cross_user_prompt_cache and not use_resume
+        # Use SystemPromptPreset with exclude_dynamic_sections=True on
+        # every turn — including resumed ones — so all turns share the
+        # same static prefix and hit the cross-user prompt cache.
+        #
+        # Requires CLI ≥ 2.1.98 (older CLIs crash when excludeDynamicSections
+        # is combined with --resume).  claude-agent-sdk >= 0.1.64 bundles
+        # CLI 2.1.116, so the pin in pyproject.toml is sufficient — no
+        # external install or env-var override needed.
         system_prompt_value = _build_system_prompt_value(
             system_prompt,
-            cross_user_cache=_cross_user,
+            cross_user_cache=config.claude_agent_cross_user_prompt_cache,
         )
 
         sdk_options_kwargs: dict[str, Any] = {
@@ -3401,15 +3412,12 @@ async def stream_chat_completion_sdk(
                     # fail with "Session ID already in use".
                     sdk_options_kwargs_retry.pop("resume", None)
                     sdk_options_kwargs_retry.pop("session_id", None)
-                # Recompute system_prompt for retry — ctx.use_resume may have
-                # changed (context reduction enabled --resume).  CLI 2.1.97
-                # crashes when excludeDynamicSections=True is combined with
-                # --resume, so disable the cross-user preset on resumed turns.
-                _cross_user_retry = (
-                    config.claude_agent_cross_user_prompt_cache and not ctx.use_resume
-                )
+                # Recompute system_prompt for retry — the preset is safe on
+                # every turn (requires CLI ≥ 2.1.98, installed in the Docker
+                # image and configured via CHAT_CLAUDE_AGENT_CLI_PATH).
                 sdk_options_kwargs_retry["system_prompt"] = _build_system_prompt_value(
-                    system_prompt, cross_user_cache=_cross_user_retry
+                    system_prompt,
+                    cross_user_cache=config.claude_agent_cross_user_prompt_cache,
                 )
                 state.options = ClaudeAgentOptions(**sdk_options_kwargs_retry)  # type: ignore[arg-type]  # dynamic kwargs
                 # Retry intentionally omits prior_messages (transcript+gap context) and

@@ -13,7 +13,14 @@ from backend.copilot.baseline.service import (
     _baseline_conversation_updater,
     _baseline_llm_caller,
     _BaselineStreamState,
+    _build_cached_system_message,
     _compress_session_messages,
+    _extract_cache_creation_tokens,
+    _fresh_anthropic_caching_headers,
+    _fresh_ephemeral_cache_control,
+    _is_anthropic_model,
+    _mark_system_message_with_cache_control,
+    _mark_tools_with_cache_control,
 )
 from backend.copilot.model import ChatMessage
 from backend.copilot.transcript_builder import TranscriptBuilder
@@ -605,11 +612,18 @@ def _make_usage_chunk(
     chunk.usage.model_extra = usage_extras
 
     if cached_tokens is not None or cache_creation_input_tokens is not None:
-        ptd = MagicMock()
-        ptd.cached_tokens = cached_tokens or 0
-        ptd.model_extra = {
-            "cache_creation_input_tokens": cache_creation_input_tokens or 0
-        }
+        # Build a real ``PromptTokensDetails`` so ``getattr(ptd,
+        # "cache_write_tokens", None)`` returns ``None`` on this SDK version
+        # (rather than a truthy MagicMock attribute) and the extraction
+        # helper's typed-attr vs model_extra fallback resolves correctly.
+        from openai.types.completion_usage import PromptTokensDetails
+
+        ptd = PromptTokensDetails.model_validate({"cached_tokens": cached_tokens or 0})
+        if cache_creation_input_tokens is not None:
+            if ptd.model_extra is None:
+                object.__setattr__(ptd, "__pydantic_extra__", {})
+            assert ptd.model_extra is not None
+            ptd.model_extra["cache_creation_input_tokens"] = cache_creation_input_tokens
         chunk.usage.prompt_tokens_details = ptd
     else:
         chunk.usage.prompt_tokens_details = None
@@ -1209,3 +1223,288 @@ class TestMidLoopPendingFlushOrdering:
         assert assistant_msgs[1].tool_calls is None
         # Crucially: only 2 assistant messages, not 3 (no duplicate)
         assert len(assistant_msgs) == 2
+
+
+class TestApplyPromptCacheMarkers:
+    """Tests for _apply_prompt_cache_markers — Anthropic ephemeral
+    cache_control markers on baseline OpenRouter requests."""
+
+    def test_system_message_converted_to_content_blocks(self):
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "hello"},
+        ]
+
+        cached_messages = _mark_system_message_with_cache_control(messages)
+
+        assert cached_messages[0]["role"] == "system"
+        assert cached_messages[0]["content"] == [
+            {
+                "type": "text",
+                "text": "You are helpful.",
+                "cache_control": {"type": "ephemeral", "ttl": "1h"},
+            }
+        ]
+        # User message must be untouched.
+        assert cached_messages[1] == {"role": "user", "content": "hello"}
+
+    def test_system_message_preserves_unknown_fields(self):
+        # Future-proofing: a system message with extra keys (e.g. "name") must
+        # keep them after the content-blocks conversion.
+        messages = [
+            {"role": "system", "content": "sys", "name": "developer"},
+        ]
+
+        cached_messages = _mark_system_message_with_cache_control(messages)
+
+        assert cached_messages[0]["name"] == "developer"
+        assert cached_messages[0]["role"] == "system"
+
+    def test_last_tool_gets_cache_control(self):
+        tools = [
+            {"type": "function", "function": {"name": "a"}},
+            {"type": "function", "function": {"name": "b"}},
+        ]
+
+        cached_tools = _mark_tools_with_cache_control(tools)
+
+        assert "cache_control" not in cached_tools[0]
+        assert cached_tools[-1]["cache_control"] == {
+            "type": "ephemeral",
+            "ttl": "1h",
+        }
+        # Last tool's other fields preserved.
+        assert cached_tools[-1]["function"] == {"name": "b"}
+
+    def test_does_not_mutate_input(self):
+        messages = [{"role": "system", "content": "sys"}]
+        tools = [{"type": "function", "function": {"name": "a"}}]
+
+        _mark_system_message_with_cache_control(messages)
+        _mark_tools_with_cache_control(tools)
+
+        assert messages == [{"role": "system", "content": "sys"}]
+        assert tools == [{"type": "function", "function": {"name": "a"}}]
+
+    def test_no_system_message_safe(self):
+        messages = [{"role": "user", "content": "hi"}]
+        cached_messages = _mark_system_message_with_cache_control(messages)
+        assert cached_messages == messages
+
+    def test_empty_tools_safe(self):
+        assert _mark_tools_with_cache_control([]) == []
+
+    def test_non_string_system_content_left_untouched(self):
+        # If the content is already a list of blocks (e.g. caller pre-marked),
+        # the helper must not overwrite it.
+        pre_marked = [
+            {
+                "type": "text",
+                "text": "sys",
+                "cache_control": {"type": "ephemeral", "ttl": "1h"},
+            }
+        ]
+        messages = [{"role": "system", "content": pre_marked}]
+        cached_messages = _mark_system_message_with_cache_control(messages)
+        assert cached_messages[0]["content"] == pre_marked
+
+    def test_is_anthropic_model_matches_claude_and_anthropic_prefix(self):
+        assert _is_anthropic_model("anthropic/claude-sonnet-4-6")
+        assert _is_anthropic_model("claude-3-5-sonnet-20241022")
+        assert _is_anthropic_model("anthropic.claude-3-5-sonnet-20241022-v2:0")
+        assert _is_anthropic_model("ANTHROPIC/Claude-Opus")  # case insensitive
+
+    def test_is_anthropic_model_rejects_other_providers(self):
+        assert not _is_anthropic_model("openai/gpt-4o")
+        assert not _is_anthropic_model("openai/gpt-5")
+        assert not _is_anthropic_model("google/gemini-2.5-pro")
+        assert not _is_anthropic_model("xai/grok-4")
+        assert not _is_anthropic_model("meta-llama/llama-3.3-70b-instruct")
+
+    def test_cache_control_uses_configured_ttl(self, monkeypatch):
+        """TTL comes from ChatConfig.baseline_prompt_cache_ttl — defaults
+        to 1h so the static prefix (system + tools) stays warm across
+        workspace users past the 5-min default window."""
+        from backend.copilot.baseline import service as bsvc
+
+        assert bsvc.config.baseline_prompt_cache_ttl == "1h"
+        cc = bsvc._fresh_ephemeral_cache_control()
+        assert cc == {"type": "ephemeral", "ttl": "1h"}
+        monkeypatch.setattr(bsvc.config, "baseline_prompt_cache_ttl", "5m")
+        assert bsvc._fresh_ephemeral_cache_control() == {
+            "type": "ephemeral",
+            "ttl": "5m",
+        }
+
+    def test_fresh_helpers_return_distinct_objects(self):
+        """Regression guard: the `_fresh_*` helpers must return a NEW dict
+        on every call.  A future refactor returning a module-level constant
+        would silently reintroduce the shared-mutable-state bug flagged
+        during earlier review cycles."""
+        assert _fresh_ephemeral_cache_control() is not _fresh_ephemeral_cache_control()
+        assert (
+            _fresh_anthropic_caching_headers() is not _fresh_anthropic_caching_headers()
+        )
+
+    def test_extract_cache_creation_tokens_openrouter_typed_attr(self):
+        """Newer ``openai-python`` declares ``cache_write_tokens`` as a
+        typed attribute on ``PromptTokensDetails`` — it no longer lands in
+        ``model_extra``.  Verified empirically against the production
+        openai==1.113 installed in this venv: OpenRouter streaming
+        response populates ``ptd.cache_write_tokens`` directly while
+        ``ptd.model_extra`` is ``{}``.
+        """
+        from openai.types.completion_usage import PromptTokensDetails
+
+        ptd = PromptTokensDetails.model_validate(
+            {
+                "audio_tokens": 0,
+                "cached_tokens": 0,
+                "cache_write_tokens": 4432,
+                "video_tokens": 0,
+            }
+        )
+        assert getattr(ptd, "cache_write_tokens", None) == 4432
+        assert _extract_cache_creation_tokens(ptd) == 4432
+
+    def test_extract_cache_creation_tokens_openrouter_model_extra(self):
+        """Older SDKs that don't yet declare ``cache_write_tokens`` as a
+        typed field leave it in ``model_extra`` — the helper must still
+        find it there."""
+        from openai.types.completion_usage import PromptTokensDetails
+
+        ptd = PromptTokensDetails.model_validate({"cached_tokens": 0})
+        # Force the value into model_extra (simulates the old SDK shape
+        # where the field wasn't typed yet).
+        if ptd.model_extra is None:
+            # Pydantic v2 sometimes exposes __pydantic_extra__ as None when
+            # extras are disabled; initialise to a dict to mutate safely.
+            object.__setattr__(ptd, "__pydantic_extra__", {})
+        assert ptd.model_extra is not None
+        ptd.model_extra["cache_write_tokens"] = 7777
+        assert _extract_cache_creation_tokens(ptd) == 7777
+
+    def test_extract_cache_creation_tokens_anthropic_native_field(self):
+        """Direct Anthropic API uses ``cache_creation_input_tokens`` —
+        falls through as the final path when neither
+        ``cache_write_tokens`` typed attr nor model_extra entry exists."""
+        from openai.types.completion_usage import PromptTokensDetails
+
+        ptd = PromptTokensDetails.model_validate({"cached_tokens": 0})
+        if ptd.model_extra is None:
+            object.__setattr__(ptd, "__pydantic_extra__", {})
+        assert ptd.model_extra is not None
+        ptd.model_extra["cache_creation_input_tokens"] = 2048
+        assert _extract_cache_creation_tokens(ptd) == 2048
+
+    def test_extract_cache_creation_tokens_absent(self):
+        """Neither provider field present → 0 (non-Anthropic routes or
+        cache-miss responses)."""
+        from openai.types.completion_usage import PromptTokensDetails
+
+        ptd = PromptTokensDetails.model_validate({"cached_tokens": 0})
+        assert _extract_cache_creation_tokens(ptd) == 0
+
+    def test_build_cached_system_message_applies_cache_control(self):
+        """The single-message helper wraps the string content in a text block
+        with an ephemeral cache_control marker."""
+        out = _build_cached_system_message({"role": "system", "content": "hi"})
+        assert out["role"] == "system"
+        assert out["content"] == [
+            {
+                "type": "text",
+                "text": "hi",
+                "cache_control": {"type": "ephemeral", "ttl": "1h"},
+            }
+        ]
+
+    def test_build_cached_system_message_preserves_extra_fields(self):
+        """Unknown keys (e.g. ``name``) survive the transformation."""
+        out = _build_cached_system_message(
+            {"role": "system", "content": "sys", "name": "dev"}
+        )
+        assert out["name"] == "dev"
+        assert out["role"] == "system"
+
+    def test_build_cached_system_message_non_string_passthrough(self):
+        """Pre-marked list content is returned as-is (shallow-copied)."""
+        pre_marked = [
+            {
+                "type": "text",
+                "text": "sys",
+                "cache_control": {"type": "ephemeral", "ttl": "1h"},
+            }
+        ]
+        out = _build_cached_system_message({"role": "system", "content": pre_marked})
+        assert out["content"] is pre_marked
+
+    @pytest.mark.asyncio
+    async def test_baseline_llm_caller_memoises_cached_system_message(self):
+        """The cached system dict is built once and reused across rounds.
+
+        Guards against the perf regression where the entire (growing)
+        ``messages`` list was copied on every tool-call iteration just to
+        mark the static system prompt.
+        """
+        state = _BaselineStreamState(model="anthropic/claude-sonnet-4")
+        chunk = _make_usage_chunk(prompt_tokens=10, completion_tokens=5)
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=[_make_stream_mock(chunk), _make_stream_mock(chunk)]
+        )
+
+        messages: list[dict] = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "hi"},
+        ]
+        with patch(
+            "backend.copilot.baseline.service._get_openai_client",
+            return_value=mock_client,
+        ):
+            await _baseline_llm_caller(messages=messages, tools=[], state=state)
+            first_cached = state.cached_system_message
+            assert first_cached is not None
+            # Simulate the tool-call loop growing ``messages`` between rounds.
+            messages.append({"role": "assistant", "content": "ok"})
+            messages.append({"role": "user", "content": "follow up"})
+            await _baseline_llm_caller(messages=messages, tools=[], state=state)
+
+        # Same dict instance reused — not rebuilt per round.
+        assert state.cached_system_message is first_cached
+
+        # Second call's first message is the memoised system dict (not a new copy).
+        second_call_messages = mock_client.chat.completions.create.call_args_list[1][1][
+            "messages"
+        ]
+        assert second_call_messages[0] is first_cached
+        # And the tail messages were spliced in, not re-copied.
+        assert second_call_messages[1] is messages[1]
+        assert second_call_messages[-1] is messages[-1]
+
+    @pytest.mark.asyncio
+    async def test_baseline_llm_caller_skips_memoisation_for_non_anthropic(self):
+        """Non-Anthropic routes pass messages through unmodified — no cache
+        dict is built, no list splicing happens."""
+        state = _BaselineStreamState(model="openai/gpt-4o")
+        chunk = _make_usage_chunk(prompt_tokens=10, completion_tokens=5)
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(
+            return_value=_make_stream_mock(chunk)
+        )
+
+        messages: list[dict] = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hi"},
+        ]
+        with patch(
+            "backend.copilot.baseline.service._get_openai_client",
+            return_value=mock_client,
+        ):
+            await _baseline_llm_caller(messages=messages, tools=[], state=state)
+
+        assert state.cached_system_message is None
+        # The exact same list object reaches the provider (no copy needed).
+        call_messages = mock_client.chat.completions.create.call_args[1]["messages"]
+        assert call_messages is messages

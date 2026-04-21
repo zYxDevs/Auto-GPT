@@ -15,7 +15,7 @@ import re
 import shutil
 import tempfile
 import uuid
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
@@ -47,7 +47,7 @@ from backend.copilot.pending_messages import (
     drain_pending_messages,
     format_pending_as_user_message,
 )
-from backend.copilot.prompting import get_baseline_supplement, get_graphiti_supplement
+from backend.copilot.prompting import SHARED_TOOL_NOTES, get_graphiti_supplement
 from backend.copilot.response_model import (
     StreamBaseResponse,
     StreamError,
@@ -168,12 +168,37 @@ def _extract_usage_cost(usage: CompletionUsage) -> float | None:
 
 
 def _extract_cache_creation_tokens(ptd: PromptTokensDetails) -> int:
-    """Read Anthropic's ``cache_creation_input_tokens`` off an OpenAI
-    ``PromptTokensDetails`` — it's a provider-specific extra, not in the
-    typed model, so we read it via ``model_extra`` rather than
-    ``getattr``.
+    """Return cache-write token count from an OpenAI-compatible
+    ``PromptTokensDetails``, handling provider-specific field names and
+    SDK-version shape differences.
+
+    Two shapes we care about:
+
+    - **OpenRouter** (our primary baseline provider) streams the cache-write
+      count as ``cache_write_tokens``.  Newer ``openai-python`` versions
+      declare this as a typed attribute on ``PromptTokensDetails``; older
+      versions expose it only in ``model_extra``.  Verified empirically:
+      cold-cache request returns ``cache_write_tokens`` > 0, warm-cache
+      request returns ``cached_tokens`` > 0 and ``cache_write_tokens`` = 0.
+    - **Direct Anthropic API** uses ``cache_creation_input_tokens`` —
+      never a typed attribute on the OpenAI SDK, always lives in
+      ``model_extra``.
+
+    Lookup order: typed attr → ``model_extra`` (OpenRouter) → ``model_extra``
+    (Anthropic-native).  ``getattr`` handles both the typed-attr case
+    (newer SDK) and the no-such-attr case (older SDK) — we can't only use
+    ``model_extra`` because when the field is typed it's filtered out of
+    ``model_extra``, leaving us at 0 on the modern happy path.
     """
-    return int((ptd.model_extra or {}).get("cache_creation_input_tokens") or 0)
+    typed_val = getattr(ptd, "cache_write_tokens", None)
+    if typed_val:
+        return int(typed_val)
+    extras = ptd.model_extra or {}
+    return int(
+        extras.get("cache_write_tokens")
+        or extras.get("cache_creation_input_tokens")
+        or 0
+    )
 
 
 async def _prepare_baseline_attachments(
@@ -327,6 +352,137 @@ class _BaselineStreamState:
     # block only appends the *new* assistant text (avoiding duplication of
     # round-1 text when round-1 entries were cleared from session_messages).
     _flushed_assistant_text_len: int = 0
+    # Memoised system-message dict with cache_control applied.  The system
+    # prompt is static within a session, so we build it once on the first
+    # LLM round and reuse the same dict on subsequent rounds — avoiding
+    # an O(N) dict-copy of the growing ``messages`` list on every tool-call
+    # iteration.  ``None`` means "not yet computed" (or the first message
+    # wasn't a system role, so no marking applies).
+    cached_system_message: dict[str, Any] | None = None
+
+
+def _is_anthropic_model(model: str) -> bool:
+    """Return True if *model* routes to Anthropic (native or via OpenRouter).
+
+    Cache-control markers on message content + the ``anthropic-beta`` header
+    are Anthropic-specific.  OpenAI rejects the unknown ``cache_control``
+    field with a 400 ("Extra inputs are not permitted") and Grok / other
+    providers behave similarly.  OpenRouter strips unknown headers but
+    passes through ``cache_control`` on the body regardless of provider —
+    which would also fail when OpenRouter routes to a non-Anthropic model.
+
+    Examples that return True:
+      - ``anthropic/claude-sonnet-4-6`` (OpenRouter route)
+      - ``claude-3-5-sonnet-20241022`` (direct Anthropic API)
+      - ``anthropic.claude-3-5-sonnet`` (Bedrock-style)
+
+    False for ``openai/gpt-4o``, ``google/gemini-2.5-pro``, ``xai/grok-4``
+    etc.
+    """
+    lowered = model.lower()
+    return "claude" in lowered or lowered.startswith("anthropic")
+
+
+def _fresh_ephemeral_cache_control() -> dict[str, str]:
+    """Return a FRESH ephemeral ``cache_control`` dict each call.
+
+    The ``ttl`` is sourced from :attr:`ChatConfig.baseline_prompt_cache_ttl`
+    (default ``1h``) so the static prefix stays warm across many users'
+    requests in the same workspace cache.  Anthropic caches are keyed
+    per-workspace, so every copilot user reading the same system prompt
+    hits the same cached entry.
+
+    Using a shared module-level dict would let any downstream mutation
+    (e.g. the OpenAI SDK normalising fields in-place) poison every future
+    request's marker.  Construction is O(1) so the safety margin is free.
+    """
+    return {"type": "ephemeral", "ttl": config.baseline_prompt_cache_ttl}
+
+
+def _fresh_anthropic_caching_headers() -> dict[str, str]:
+    """Return a FRESH ``extra_headers`` dict requesting the Anthropic
+    prompt-caching beta.
+
+    Same reasoning as :func:`_fresh_ephemeral_cache_control`: never hand a
+    shared module-level dict to third-party SDKs.  OpenRouter auto-forwards
+    cache_control for Anthropic routes without this header, but passing it
+    makes the intent unambiguous on-wire and is a no-op for non-Anthropic
+    providers (unknown headers are dropped).
+    """
+    return {"anthropic-beta": "prompt-caching-2024-07-31"}
+
+
+def _mark_tools_with_cache_control(
+    tools: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return a copy of *tools* with ``cache_control`` on the last entry.
+
+    Marking the last tool is a cache breakpoint that covers the whole tool
+    schema block as a cacheable prefix segment.  Extracted from
+    :func:`_mark_system_message_with_cache_control` so callers can precompute
+    the marked tool list once per session — the tool set is static within a
+    request and the ~43 dict-copies would otherwise run on every LLM round
+    in the tool-call loop.
+
+    **Only call this for Anthropic model routes.**  Non-Anthropic providers
+    (OpenAI, Grok, Gemini) reject the unknown ``cache_control`` field with
+    a 400 schema validation error.  Gate via :func:`_is_anthropic_model`.
+    """
+    cached: list[dict[str, Any]] = [dict(t) for t in tools]
+    if cached:
+        cached[-1] = {
+            **cached[-1],
+            "cache_control": _fresh_ephemeral_cache_control(),
+        }
+    return cached
+
+
+def _build_cached_system_message(
+    system_message: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return a copy of *system_message* with ``cache_control`` applied.
+
+    Anthropic's cache uses prefix-match with up to 4 explicit breakpoints.
+    Combined with the last-tool marker this gives two cache segments — the
+    system block alone, and system+all-tools — so requests that share only
+    the system prefix still get a partial cache hit.
+
+    The system message is rebuilt via spread (``{**original, ...}``) so any
+    unknown fields the caller set (e.g. ``name``) survive the transformation.
+    Non-Anthropic models silently ignore the markers.
+
+    Returns the original dict (shallow-copied) unchanged when the content
+    shape is unsupported (missing / non-string / empty) — callers should
+    splice it into the message list as-is in that case.
+    """
+    sys_copy = dict(system_message)
+    sys_content = sys_copy.get("content")
+    if isinstance(sys_content, str) and sys_content:
+        sys_copy["content"] = [
+            {
+                "type": "text",
+                "text": sys_content,
+                "cache_control": _fresh_ephemeral_cache_control(),
+            }
+        ]
+    return sys_copy
+
+
+def _mark_system_message_with_cache_control(
+    messages: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return a copy of *messages* with ``cache_control`` on the system block.
+
+    Thin wrapper around :func:`_build_cached_system_message` that preserves
+    the original list shape.  Prefer the memoised path in
+    ``_baseline_llm_caller`` (which builds the cached system dict once per
+    session) for hot-loop callers; this function is retained for call sites
+    outside the tool-call loop where per-call copying is acceptable.
+    """
+    cached_messages: list[dict[str, Any]] = [dict(m) for m in messages]
+    if cached_messages and cached_messages[0].get("role") == "system":
+        cached_messages[0] = _build_cached_system_message(cached_messages[0])
+    return cached_messages
 
 
 async def _baseline_llm_caller(
@@ -347,28 +503,51 @@ async def _baseline_llm_caller(
     round_text = ""
     try:
         client = _get_openai_client()
-        typed_messages = cast(list[ChatCompletionMessageParam], messages)
-        # extra_body `usage.include=true` asks OpenRouter to embed the real
-        # generation cost into the final usage chunk. Without this we only get
-        # token counts and have no authoritative cost for rate limiting.
-        if tools:
-            typed_tools = cast(list[ChatCompletionToolParam], tools)
-            response = await client.chat.completions.create(
-                model=state.model,
-                messages=typed_messages,
-                tools=typed_tools,
-                stream=True,
-                stream_options={"include_usage": True},
-                extra_body=_OPENROUTER_INCLUDE_USAGE_COST,
-            )
+        # Cache markers are Anthropic-specific.  For OpenAI/Grok/other
+        # providers, leaving them on would trigger a 400 ("Extra inputs
+        # are not permitted" on cache_control).  Tools were precomputed
+        # in stream_chat_completion_baseline via _mark_tools_with_cache_control
+        # (only when the model was Anthropic), so on non-Anthropic routes
+        # tools ship without cache_control on the last entry too.
+        #
+        # `extra_body` `usage.include=true` asks OpenRouter to embed the real
+        # generation cost into the final usage chunk — required by the
+        # cost-based rate limiter in routes.py.  Separate from the Anthropic
+        # caching headers, always sent.
+        is_anthropic = _is_anthropic_model(state.model)
+        if is_anthropic:
+            # Build the cached system dict once per session and splice it in
+            # on each round.  The full ``messages`` list grows with every
+            # tool call, so copying the entire list just to mutate index 0
+            # scales with conversation length (sentry flagged this); this
+            # splice touches only list slots, not message contents.
+            if (
+                state.cached_system_message is None
+                and messages
+                and messages[0].get("role") == "system"
+            ):
+                state.cached_system_message = _build_cached_system_message(messages[0])
+            if state.cached_system_message is not None and messages:
+                final_messages = [state.cached_system_message, *messages[1:]]
+            else:
+                final_messages = messages
+            extra_headers = _fresh_anthropic_caching_headers()
         else:
-            response = await client.chat.completions.create(
-                model=state.model,
-                messages=typed_messages,
-                stream=True,
-                stream_options={"include_usage": True},
-                extra_body=_OPENROUTER_INCLUDE_USAGE_COST,
-            )
+            final_messages = messages
+            extra_headers = None
+        typed_messages = cast(list[ChatCompletionMessageParam], final_messages)
+        create_kwargs: dict[str, Any] = {
+            "model": state.model,
+            "messages": typed_messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "extra_body": _OPENROUTER_INCLUDE_USAGE_COST,
+        }
+        if extra_headers:
+            create_kwargs["extra_headers"] = extra_headers
+        if tools:
+            create_kwargs["tools"] = cast(list[ChatCompletionToolParam], list(tools))
+        response = await client.chat.completions.create(**create_kwargs)
         tool_calls_by_index: dict[int, dict[str, str]] = {}
 
         # Iterate under an inner try/finally so early exits (cancel, tool-call
@@ -1170,7 +1349,7 @@ async def stream_chat_completion_baseline(
     graphiti_enabled = await is_enabled_for_user(user_id)
 
     graphiti_supplement = get_graphiti_supplement() if graphiti_enabled else ""
-    system_prompt = base_system_prompt + get_baseline_supplement() + graphiti_supplement
+    system_prompt = base_system_prompt + SHARED_TOOL_NOTES + graphiti_supplement
 
     # Warm context: pre-load relevant facts from Graphiti on first turn.
     # Use the pre-drain count so pending messages drained at turn start
@@ -1319,6 +1498,18 @@ async def stream_chat_completion_baseline(
     # --- Permission filtering ---
     if permissions is not None:
         tools = _filter_tools_by_permissions(tools, permissions)
+
+    # Pre-mark cache_control on the last tool schema once per session.  The
+    # tool set is static within a request, so doing this here (instead of in
+    # _baseline_llm_caller) avoids re-copying ~43 tool dicts on every LLM
+    # round of the tool-call loop.
+    #
+    # Only apply to Anthropic routes — OpenAI/Grok/other providers would
+    # 400 on the unknown ``cache_control`` field inside tool definitions.
+    if _is_anthropic_model(active_model):
+        tools = cast(
+            list[ChatCompletionToolParam], _mark_tools_with_cache_control(tools)
+        )
 
     # Propagate execution context so tool handlers can read session-level flags.
     set_execution_context(
@@ -1707,6 +1898,8 @@ async def stream_chat_completion_baseline(
             prompt_tokens=billed_prompt,
             completion_tokens=state.turn_completion_tokens,
             total_tokens=billed_prompt + state.turn_completion_tokens,
+            cache_read_tokens=state.turn_cache_read_tokens,
+            cache_creation_tokens=state.turn_cache_creation_tokens,
         )
 
     yield StreamFinish()
