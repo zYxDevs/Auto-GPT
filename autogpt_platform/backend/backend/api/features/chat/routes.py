@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.copilot import service as chat_service
 from backend.copilot import stream_registry
+from backend.copilot.builder_context import resolve_session_permissions
 from backend.copilot.config import ChatConfig, CopilotLlmModel, CopilotMode
 from backend.copilot.db import get_chat_messages_paginated
 from backend.copilot.executor.utils import enqueue_cancel_task, enqueue_copilot_turn
@@ -24,6 +25,7 @@ from backend.copilot.model import (
     create_chat_session,
     delete_chat_session,
     get_chat_session,
+    get_or_create_builder_session,
     get_user_sessions,
     update_session_title,
 )
@@ -133,7 +135,7 @@ def _strip_injected_context(message: dict) -> dict:
 class StreamChatRequest(BaseModel):
     """Request model for streaming chat with optional context."""
 
-    message: str
+    message: str = Field(max_length=64_000)
     is_user_message: bool = True
     context: dict[str, str] | None = None  # {url: str, content: str}
     file_ids: list[str] | None = Field(
@@ -165,15 +167,31 @@ class PeekPendingMessagesResponse(BaseModel):
 
 
 class CreateSessionRequest(BaseModel):
-    """Request model for creating a new chat session.
+    """Request model for creating (or get-or-creating) a chat session.
 
-    ``dry_run`` is a **top-level** field — do not nest it inside ``metadata``.
+    Two modes, selected by the body:
+
+    - Default: create a fresh session. ``dry_run`` is a **top-level**
+      field — do not nest it inside ``metadata``.
+    - Builder-bound: when ``builder_graph_id`` is set, the endpoint
+      switches to **get-or-create** keyed on
+      ``(user_id, builder_graph_id)``.  The builder panel calls this on
+      mount so the chat persists across refreshes.  Graph ownership is
+      validated inside :func:`get_or_create_builder_session`. Write-side
+      scope is enforced per-tool (``edit_agent`` / ``run_agent`` reject
+      any ``agent_id`` other than the bound graph) and a small blacklist
+      hides tools that conflict with the panel's scope
+      (``create_agent`` / ``customize_agent`` / ``get_agent_building_guide``
+      — see :data:`BUILDER_BLOCKED_TOOLS`). Read-side lookups
+      (``find_block``, ``find_agent``, ``search_docs``, …) stay open.
+
     Extra/unknown fields are rejected (422) to prevent silent mis-use.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     dry_run: bool = False
+    builder_graph_id: str | None = Field(default=None, max_length=128)
 
 
 class CreateSessionResponse(BaseModel):
@@ -318,29 +336,43 @@ async def create_session(
     user_id: Annotated[str, Security(auth.get_user_id)],
     request: CreateSessionRequest | None = None,
 ) -> CreateSessionResponse:
-    """
-    Create a new chat session.
+    """Create (or get-or-create) a chat session.
 
-    Initiates a new chat session for the authenticated user.
+    Two modes, selected by the request body:
+
+    - Default: create a fresh session for the user. ``dry_run=True`` forces
+      run_block and run_agent calls to use dry-run simulation.
+    - Builder-bound: when ``builder_graph_id`` is set, get-or-create keyed
+      on ``(user_id, builder_graph_id)``. Returns the existing session for
+      that graph or creates one locked to it.  Graph ownership is validated
+      inside :func:`get_or_create_builder_session`; raises 404 on
+      unauthorized access.  Write-side scope is enforced per-tool
+      (``edit_agent`` / ``run_agent`` reject any ``agent_id`` other than
+      the bound graph) and a small blacklist hides tools that conflict
+      with the panel's scope (see :data:`BUILDER_BLOCKED_TOOLS`).
 
     Args:
         user_id: The authenticated user ID parsed from the JWT (required).
-        request: Optional request body. When provided, ``dry_run=True``
-            forces run_block and run_agent calls to use dry-run simulation.
+        request: Optional request body with ``dry_run`` and/or
+            ``builder_graph_id``.
 
     Returns:
-        CreateSessionResponse: Details of the created session.
-
+        CreateSessionResponse: Details of the resulting session.
     """
     dry_run = request.dry_run if request else False
+    builder_graph_id = request.builder_graph_id if request else None
 
     logger.info(
         f"Creating session with user_id: "
         f"...{user_id[-8:] if len(user_id) > 8 else '<redacted>'}"
         f"{', dry_run=True' if dry_run else ''}"
+        f"{f', builder_graph_id={builder_graph_id}' if builder_graph_id else ''}"
     )
 
-    session = await create_chat_session(user_id, dry_run=dry_run)
+    if builder_graph_id:
+        session = await get_or_create_builder_session(user_id, builder_graph_id)
+    else:
+        session = await create_chat_session(user_id, dry_run=dry_run)
 
     return CreateSessionResponse(
         id=session.session_id,
@@ -838,7 +870,8 @@ async def stream_chat_post(
         f"user={user_id}, message_len={len(request.message)}",
         extra={"json_fields": log_meta},
     )
-    await _validate_and_get_session(session_id, user_id)
+    session = await _validate_and_get_session(session_id, user_id)
+    builder_permissions = resolve_session_permissions(session)
 
     # Self-defensive queue-fallback: if a turn is already running, don't race
     # it on the cluster lock — drop the message into the pending buffer and
@@ -953,6 +986,7 @@ async def stream_chat_post(
             file_ids=sanitized_file_ids,
             mode=request.mode,
             model=request.model,
+            permissions=builder_permissions,
             request_arrival_at=request_arrival_at,
         )
     else:

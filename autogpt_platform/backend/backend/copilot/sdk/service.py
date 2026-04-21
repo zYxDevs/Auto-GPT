@@ -96,6 +96,10 @@ from ..response_model import (
     StreamToolOutputAvailable,
     StreamUsage,
 )
+from ..builder_context import (
+    build_builder_context_turn_prefix,
+    build_builder_system_prompt_suffix,
+)
 from ..service import (
     _build_system_prompt,
     _is_langfuse_configured,
@@ -2720,6 +2724,24 @@ async def _restore_cli_session_for_turn(
     return result
 
 
+async def _maybe_prepend_builder_context(
+    session: ChatSession,
+    user_id: str | None,
+    is_user_message: bool,
+    query_message: str,
+) -> str:
+    """Prepend the per-turn ``<builder_context>`` block to the user message.
+
+    No-op for non-user messages and for sessions without a bound graph.
+    Extracted from the SDK stream body so Pyright's complexity analyser
+    stays within budget on the already-large ``stream_chat_completion_sdk``.
+    """
+    if not is_user_message or not session.metadata.builder_graph_id:
+        return query_message
+    block = await build_builder_context_turn_prefix(session, user_id)
+    return block + query_message if block else query_message
+
+
 async def stream_chat_completion_sdk(
     session_id: str,
     message: str | None = None,
@@ -2956,10 +2978,17 @@ async def stream_chat_completion_sdk(
         graphiti_enabled = await is_enabled_for_user(user_id)
 
         graphiti_supplement = get_graphiti_supplement() if graphiti_enabled else ""
+        # Append the builder-session block (graph id+name + full building
+        # guide) AFTER the shared supplements so the system prompt is
+        # byte-identical across turns of the same builder session — Claude's
+        # prompt cache keeps the ~20KB guide warm for the whole session.
+        # Empty string for non-builder sessions preserves cross-user caching.
+        builder_session_suffix = await build_builder_system_prompt_suffix(session)
         system_prompt = (
             base_system_prompt
             + get_sdk_supplement(use_e2b=use_e2b)
             + graphiti_supplement
+            + builder_session_suffix
         )
 
         # Warm context: pre-load relevant facts from Graphiti on first turn.
@@ -3288,6 +3317,18 @@ async def stream_chat_completion_sdk(
         # warm_ctx is injected via inject_user_context above (warm_ctx= kwarg).
         # No separate injection needed here.
 
+        # Inject per-turn builder context when the session is bound to a
+        # graph via ``metadata.builder_graph_id``.  Runs on EVERY user turn
+        # (including resumes) so the LLM always sees the live graph snapshot
+        # — if the user edits the graph between turns, the next turn carries
+        # the updated nodes/links.  The block also carries the full
+        # agent-building guide, replacing the per-turn
+        # ``get_agent_building_guide`` round-trip.  Not persisted to the
+        # transcript: the snapshot is stale-by-definition after the turn ends.
+        query_message = await _maybe_prepend_builder_context(
+            session, user_id, is_user_message, query_message
+        )
+
         # When running without --resume and no prior transcript in storage,
         # seed the transcript builder from compressed DB messages so that
         # upload_transcript saves a compact version for future turns.
@@ -3442,6 +3483,11 @@ async def stream_chat_completion_sdk(
                     state.query_message = f"{state.query_message}\n\n{attachments.hint}"
                 # warm_ctx is already baked into current_message via
                 # inject_user_context — no separate injection needed.
+                # Re-inject per-turn builder context so retries carry the
+                # same live graph snapshot + guide as the initial attempt.
+                state.query_message = await _maybe_prepend_builder_context(
+                    session, user_id, is_user_message, state.query_message
+                )
                 state.adapter = SDKResponseAdapter(
                     message_id=message_id, session_id=session_id
                 )

@@ -31,6 +31,10 @@ from backend.copilot.baseline.reasoning import (
     BaselineReasoningEmitter,
     reasoning_extra_body,
 )
+from backend.copilot.builder_context import (
+    build_builder_context_turn_prefix,
+    build_builder_system_prompt_suffix,
+)
 from backend.copilot.config import CopilotLlmModel, CopilotMode
 from backend.copilot.context import get_workspace_manager, set_execution_context
 from backend.copilot.graphiti.config import is_enabled_for_user
@@ -1388,7 +1392,18 @@ async def stream_chat_completion_baseline(
     graphiti_enabled = await is_enabled_for_user(user_id)
 
     graphiti_supplement = get_graphiti_supplement() if graphiti_enabled else ""
-    system_prompt = base_system_prompt + SHARED_TOOL_NOTES + graphiti_supplement
+    # Append the builder-session block (graph id+name + full building guide)
+    # AFTER the shared supplements so the system prompt is byte-identical
+    # across turns of the same builder session — Claude's prompt cache keeps
+    # the ~20KB guide warm for the whole session.  Empty string for
+    # non-builder sessions keeps the cross-user cache hot.
+    builder_session_suffix = await build_builder_system_prompt_suffix(session)
+    system_prompt = (
+        base_system_prompt
+        + SHARED_TOOL_NOTES
+        + graphiti_supplement
+        + builder_session_suffix
+    )
 
     # Warm context: pre-load relevant facts from Graphiti on first turn.
     # Use the pre-drain count so pending messages drained at turn start
@@ -1471,6 +1486,26 @@ async def stream_chat_completion_baseline(
                 break
         # Do NOT append warm_ctx to user_message_for_transcript — it would
         # persist stale temporal context into the transcript for future turns.
+
+    # Inject the per-turn ``<builder_context>`` prefix when the session is
+    # bound to a graph via ``metadata.builder_graph_id``.  Runs on every
+    # user turn (not just the first) so the LLM always sees the live graph
+    # snapshot — if the user edits the graph between turns, the next turn
+    # carries the updated nodes/links. Only version + nodes + links here;
+    # the static guide + graph id live in the system prompt via
+    # ``build_builder_system_prompt_suffix`` (session-stable, prompt-cached).
+    # Prepended AFTER any <user_context>/<memory_context>/<env_context> blocks
+    # — same trust tier as those server-injected prefixes. Not persisted to
+    # the transcript: the snapshot is stale-by-definition after the turn ends.
+    if is_user_message and session.metadata.builder_graph_id:
+        builder_block = await build_builder_context_turn_prefix(session, user_id)
+        if builder_block:
+            for msg in reversed(openai_messages):
+                if msg["role"] == "user":
+                    existing = msg.get("content", "")
+                    if isinstance(existing, str):
+                        msg["content"] = builder_block + existing
+                    break
 
     # Append user message to transcript.
     # Always append when the message is present and is from the user,
