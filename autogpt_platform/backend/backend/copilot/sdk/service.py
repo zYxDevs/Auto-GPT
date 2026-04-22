@@ -109,6 +109,7 @@ from ..service import (
 )
 from ..thinking_stripper import ThinkingStripper
 from ..token_tracking import persist_and_record_usage
+from ..tools import ToolGroup
 from ..tools.e2b_sandbox import get_or_create_sandbox, pause_sandbox_direct
 from ..tools.sandbox import WORKSPACE_PREFIX, make_session_path
 from ..tracking import track_user_message
@@ -3072,10 +3073,18 @@ async def stream_chat_completion_sdk(
             on_compact=compaction.on_compact,
         )
 
+        disabled_tool_groups: list[ToolGroup] = []
+        if not graphiti_enabled:
+            disabled_tool_groups.append("graphiti")
+
         if permissions is not None:
-            allowed, disallowed = apply_tool_permissions(permissions, use_e2b=use_e2b)
+            allowed, disallowed = apply_tool_permissions(
+                permissions, use_e2b=use_e2b, disabled_groups=disabled_tool_groups
+            )
         else:
-            allowed = get_copilot_tool_names(use_e2b=use_e2b)
+            allowed = get_copilot_tool_names(
+                use_e2b=use_e2b, disabled_groups=disabled_tool_groups
+            )
             disallowed = get_sdk_disallowed_tools(use_e2b=use_e2b)
 
         def _on_stderr(line: str) -> None:
