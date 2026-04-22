@@ -267,7 +267,7 @@ class SDKResponseAdapter:
 
                     # Strip MCP prefix so frontend sees "find_block"
                     # instead of "mcp__copilot__find_block".
-                    tool_name = block.name.removeprefix(MCP_TOOL_PREFIX)
+                    tool_name = block.name.strip().removeprefix(MCP_TOOL_PREFIX)
 
                     responses.append(
                         StreamToolInputStart(toolCallId=block.id, toolName=tool_name)
