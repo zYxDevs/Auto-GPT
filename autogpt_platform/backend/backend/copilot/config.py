@@ -3,7 +3,7 @@
 import os
 from typing import Literal
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 from backend.util.clients import OPENROUTER_BASE_URL
@@ -54,7 +54,7 @@ class ChatConfig(BaseSettings):
         "``reasoning`` + ``include_reasoning`` extension params on the "
         "Moonshot endpoints — so the baseline reasoning plumbing lights up "
         "without provider-specific code.  Roll back to the Anthropic route "
-        "via ``CHAT_FAST_STANDARD_MODEL=anthropic/claude-sonnet-4-6`` (then "
+        "via ``CHAT_FAST_STANDARD_MODEL=anthropic/claude-sonnet-4.6`` (then "
         "``cache_control`` breakpoints reactivate via "
         "``_is_anthropic_model``).",
     )
@@ -65,17 +65,20 @@ class ChatConfig(BaseSettings):
         "Override via ``CHAT_FAST_ADVANCED_MODEL``.",
     )
     thinking_standard_model: str = Field(
-        default="anthropic/claude-sonnet-4-6",
+        default="moonshotai/kimi-k2.6",
         validation_alias=AliasChoices(
             "CHAT_THINKING_STANDARD_MODEL",
             "CHAT_MODEL",
         ),
         description="SDK (extended-thinking) path, 'standard' / ``None`` "
-        "tier.  Sonnet by default: the Claude Agent SDK CLI only speaks to "
-        "Anthropic endpoints, so the standard SDK tier has to stay on an "
-        "Anthropic model regardless of what the baseline path runs.  "
-        "Override via ``CHAT_THINKING_STANDARD_MODEL`` (legacy "
-        "``CHAT_MODEL`` still honored).",
+        "tier.  Kimi K2.6 by default: routed via OpenRouter's Anthropic-"
+        "compatible ``/v1/messages`` endpoint, which the Claude Agent SDK "
+        "CLI accepts as a drop-in ``ANTHROPIC_BASE_URL`` target.  The same "
+        "cost/capability rationale as the baseline path applies — ~5x "
+        "cheaper than Sonnet at SWE-Bench parity.  Roll back to Sonnet via "
+        "``CHAT_THINKING_STANDARD_MODEL=anthropic/claude-sonnet-4.6`` (then "
+        "the SDK ``cache_control`` markers reactivate).  Direct-Anthropic "
+        "deployments (no OpenRouter) must override to an Anthropic model.",
     )
     thinking_advanced_model: str = Field(
         default="anthropic/claude-opus-4.7",
@@ -269,9 +272,10 @@ class ChatConfig(BaseSettings):
         Field(
             default=None,
             description="Thinking effort level: 'low', 'medium', 'high', 'max', or None. "
-            "Only applies to models with extended thinking (Opus). "
-            "Sonnet doesn't have extended thinking — setting effort on Sonnet "
-            "can cause <internal_reasoning> tag leaks. "
+            "Applies to models that emit a reasoning channel — Opus (extended "
+            "thinking) and Kimi K2.6 (OpenRouter ``reasoning`` extension lit "
+            "up by #12871).  Sonnet does not have extended thinking — setting "
+            "effort on Sonnet can cause <internal_reasoning> tag leaks. "
             "None = let the model decide. Override via CHAT_CLAUDE_AGENT_THINKING_EFFORT.",
         )
     )
@@ -302,6 +306,41 @@ class ChatConfig(BaseSettings):
         "reads amortise the higher write cost. Anthropic has no longer "
         "(24h, permanent) TTL option — see "
         "https://platform.claude.com/docs/en/build-with-claude/prompt-caching.",
+    )
+    sdk_include_partial_messages: bool = Field(
+        default=False,
+        description="Enable per-token streaming on the SDK path by setting "
+        "``include_partial_messages=True`` on ``ClaudeAgentOptions``.  The "
+        "CLI then emits raw Anthropic ``content_block_delta`` events as "
+        "``StreamEvent`` messages ahead of each summary "
+        "``AssistantMessage``, so long answers and extended-thinking "
+        "reasoning land on the wire token-by-token instead of popping in "
+        "as a lump at ``content_block_stop``.  Matches the perceptual "
+        "progress the baseline path has shipped since #12873.  Off by "
+        "default to keep the rollout staged; the adapter falls back to "
+        "summary-only emission when this flag is False.  See "
+        "``docs/sdk-per-token-streaming-followup.md`` for the diff-based "
+        "reconcile logic that prevents partial/summary double-emission "
+        "and truncation when the two views disagree.",
+    )
+    sdk_reconcile_openrouter_cost: bool = Field(
+        default=True,
+        description="Query OpenRouter's ``/api/v1/generation?id=`` after each "
+        "SDK turn and record the authoritative ``total_cost`` instead of the "
+        "Claude Agent SDK CLI's estimate.  Covers every OpenRouter-routed "
+        "SDK turn regardless of vendor — the CLI's static Anthropic pricing "
+        "table is accurate for Anthropic models (Sonnet/Opus via OpenRouter "
+        "bill at Anthropic's own rates, penny-for-penny), but the reconcile "
+        "catches any future rate change the CLI hasn't picked up and makes "
+        "non-Anthropic cost (Kimi et al) correct — real billed amount, "
+        "matching the baseline path's ``usage.cost`` read since #12864.  "
+        "Kill-switch for emergencies: set ``CHAT_SDK_RECONCILE_OPENROUTER_COST"
+        "=false`` to fall back to the CLI's ``total_cost_usd`` reported "
+        "synchronously (accurate-for-Anthropic / over-billed-for-Kimi).  "
+        "Tradeoff: 0.5-2s window between turn end and cost write; rate-limit "
+        "counter briefly unaware, back-to-back turns in that window see "
+        "stale state.  The alternative (writing an estimate sync then a "
+        "correction delta) would double-count the rate limit.",
     )
     claude_agent_cli_path: str | None = Field(
         default=None,
@@ -472,6 +511,59 @@ class ChatConfig(BaseSettings):
                     "Check file permissions."
                 )
         return v
+
+    @model_validator(mode="after")
+    def _validate_sdk_model_vendor_compatibility(self) -> "ChatConfig":
+        """Fail at config load when an SDK model slug is incompatible with
+        explicit direct-Anthropic mode.
+
+        The SDK path's ``_normalize_model_name`` raises ``ValueError`` when
+        a non-Anthropic vendor slug (e.g. ``moonshotai/kimi-k2.6``) is paired
+        with direct-Anthropic mode — but that fires inside the request loop,
+        so a misconfigured deployment would surface a 500 to every user
+        instead of failing visibly at boot.
+
+        Only the **explicit** opt-out (``use_openrouter=False``) is checked
+        here, not the credential-missing path.  Build environments and
+        OpenAPI-schema export jobs construct ``ChatConfig()`` without any
+        OpenRouter credentials in the env — that's not a misconfiguration,
+        it's "config loads ok, but no SDK turn will succeed until creds are
+        wired".  The runtime guard in ``_normalize_model_name`` still
+        catches the credential-missing path on the first SDK turn.
+
+        Covers all three SDK fields that flow through
+        ``_normalize_model_name``: primary tier
+        (``thinking_standard_model``), advanced tier
+        (``thinking_advanced_model``), and fallback model
+        (``claude_agent_fallback_model`` via ``_resolve_fallback_model``).
+
+        Skipped when ``use_claude_code_subscription=True`` because the
+        subscription path resolves the model to ``None`` (CLI default)
+        and never calls ``_normalize_model_name``.  Empty fallback strings
+        are also skipped (no fallback configured).
+        """
+        if self.use_claude_code_subscription:
+            return self
+        if self.use_openrouter:
+            return self
+        for field_name in (
+            "thinking_standard_model",
+            "thinking_advanced_model",
+            "claude_agent_fallback_model",
+        ):
+            value: str = getattr(self, field_name)
+            if not value or "/" not in value:
+                continue
+            if value.split("/", 1)[0] != "anthropic":
+                raise ValueError(
+                    f"Direct-Anthropic mode (use_openrouter=False) "
+                    f"requires an Anthropic model for {field_name}, got "
+                    f"{value!r}. Set CHAT_THINKING_STANDARD_MODEL / "
+                    f"CHAT_THINKING_ADVANCED_MODEL / "
+                    f"CHAT_CLAUDE_AGENT_FALLBACK_MODEL to an anthropic/* "
+                    f"slug, or set CHAT_USE_OPENROUTER=true."
+                )
+        return self
 
     # Prompt paths for different contexts
     PROMPT_PATHS: dict[str, str] = {
