@@ -16,7 +16,7 @@ function nextRunMs(item: { next_run_time?: string | null }): number {
   return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
 }
 
-export function useFollowupsPage() {
+export function useSchedulesPanel() {
   // Followups (copilot_turn) — the scheduled-message side of the
   // feature.  Stored via ``schedule_followup`` MCP tool.
   const copilotQuery = useListCopilotFollowupSchedules({
@@ -46,13 +46,20 @@ export function useFollowupsPage() {
     (a, b) => nextRunMs(a.item) - nextRunMs(b.item),
   );
 
+  const isLoading = copilotQuery.isLoading || graphQuery.isLoading;
+  const fetchError = copilotQuery.error ?? graphQuery.error;
+
   return {
     // Backwards-compat alias — ``followups`` was the only-copilot
     // collection name before unification.  Existing tests still
     // reference it.
     followups: copilotQuery.data ?? [],
     schedules,
-    isLoading: copilotQuery.isLoading || graphQuery.isLoading,
-    error: copilotQuery.error ?? graphQuery.error,
+    isLoading,
+    // The two sources are independent — only hard-fail once both have
+    // settled and there is nothing to show; a partial failure keeps the
+    // loaded list visible and surfaces a non-blocking warning instead.
+    error: !isLoading && schedules.length === 0 ? fetchError : null,
+    partialError: !isLoading && schedules.length > 0 ? fetchError : null,
   };
 }
