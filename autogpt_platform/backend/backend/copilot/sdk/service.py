@@ -1532,9 +1532,44 @@ def _flush_orphan_tool_uses_to_session(
                 else json.dumps(resp.output, ensure_ascii=False)
             )
             session.messages.append(
-                ChatMessage(role="tool", content=content, tool_call_id=resp.toolCallId)
+                ChatMessage(
+                    role="tool",
+                    content=content,
+                    tool_call_id=resp.toolCallId,
+                    name=_resolve_tool_result_name(
+                        session, resp.toolCallId, resp.toolName
+                    ),
+                )
             )
     return safety
+
+
+def _resolve_tool_result_name(
+    session: "ChatSession",
+    tool_call_id: str,
+    tool_name: str | None,
+) -> str | None:
+    """Name for a persisted tool-result row, falling back to the matching
+    assistant ``tool_call`` — a nameless row is unidentifiable in history,
+    which is the exact defect the ``name`` column exists to fix."""
+    if tool_name:
+        return tool_name
+    for msg in reversed(session.messages):
+        for tc in msg.tool_calls or []:
+            if tc.get("id") == tool_call_id:
+                if name := tc.get("function", {}).get("name"):
+                    return name
+                logger.warning(
+                    f"Persisting nameless tool-result row for session "
+                    f"{session.session_id}: matching tool_call "
+                    f"{tool_call_id} has no function name"
+                )
+                return None
+    logger.warning(
+        f"Persisting nameless tool-result row for session {session.session_id}: "
+        f"no name provided and no matching tool_call {tool_call_id} in history"
+    )
+    return None
 
 
 @dataclass(frozen=True)
@@ -3069,6 +3104,7 @@ def _dispatch_response(
             }
         )
         acc.assistant_response.tool_calls = acc.accumulated_tool_calls
+        acc.assistant_response.mark_tool_calls_pending_save()
         if not acc.has_appended_assistant:
             ctx.session.messages.append(acc.assistant_response)
             acc.has_appended_assistant = True
@@ -3107,6 +3143,9 @@ def _dispatch_response(
                 role="tool",
                 content=content,
                 tool_call_id=response.toolCallId,
+                name=_resolve_tool_result_name(
+                    ctx.session, response.toolCallId, response.toolName
+                ),
             )
         )
         if not entries_replaced:
