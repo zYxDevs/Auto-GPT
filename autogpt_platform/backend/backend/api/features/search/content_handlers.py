@@ -20,6 +20,7 @@ from prisma.enums import ContentType
 from backend.blocks import get_blocks
 from backend.blocks.llm import LlmModel
 from backend.data.db import query_raw_with_schema
+from backend.util.docs import get_docs_root
 from backend.util.text import split_camelcase
 
 if TYPE_CHECKING:
@@ -404,20 +405,12 @@ class DocumentationHandler(ContentHandler):
     def content_type(self) -> ContentType:
         return ContentType.DOCUMENTATION
 
-    def _get_docs_root(self) -> Path:
-        """Get the documentation root directory."""
-        # content_handlers.py is at: backend/backend/api/features/store/content_handlers.py
-        # Need to go up to project root then into docs/
-        # In container: /app/autogpt_platform/backend/backend/api/features/store -> /app/docs
-        # In development: /repo/autogpt_platform/backend/backend/api/features/store -> /repo/docs
-        this_file = Path(
-            __file__
-        )  # .../backend/backend/api/features/store/content_handlers.py
-        project_root = (
-            this_file.parent.parent.parent.parent.parent.parent.parent
-        )  # -> /app or /repo
-        docs_root = project_root / "docs"
-        return docs_root
+    def _get_docs_root(self) -> Path | None:
+        """Get the documentation root directory (shared with the copilot
+        docs tools so indexed paths and page reads always agree), or None
+        when this deployment didn't bundle the docs — the indexer degrades
+        to empty results instead of crashing."""
+        return get_docs_root()
 
     def _extract_doc_title(self, file_path: Path) -> str:
         """Extract the document title from a markdown file."""
@@ -577,8 +570,8 @@ class DocumentationHandler(ContentHandler):
         """
         docs_root = self._get_docs_root()
 
-        if not docs_root.exists():
-            logger.warning(f"Documentation root not found: {docs_root}")
+        if docs_root is None:
+            logger.warning("Documentation root not found")
             return []
 
         # Find all .md and .mdx files
@@ -682,7 +675,7 @@ class DocumentationHandler(ContentHandler):
         """
         docs_root = self._get_docs_root()
 
-        if not docs_root.exists():
+        if docs_root is None:
             return {"total": 0, "with_embeddings": 0, "without_embeddings": 0}
 
         # Get all section content IDs
@@ -714,7 +707,7 @@ class DocumentationHandler(ContentHandler):
         # or removed section drops from this set and its embedding gets
         # cleaned up.
         docs_root = self._get_docs_root()
-        if not docs_root.exists():
+        if docs_root is None:
             return set()
         # Filesystem walk is sync; keep it off the event loop.
         return await asyncio.to_thread(self._get_all_section_content_ids, docs_root)
